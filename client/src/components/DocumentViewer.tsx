@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2, FileText } from 'lucide-react';
 import { api, getToken } from '../lib/api';
+import { API_PREFIX } from '../lib/config';
 import { DocumentDetail } from '../types';
 
 export default function DocumentViewer({ docId }: { docId: string | null }) {
@@ -25,7 +26,7 @@ export default function DocumentViewer({ docId }: { docId: string | null }) {
   useEffect(() => {
     let revoked = '';
     if (doc?.fileType === 'pdf' && docId) {
-      fetch(`/api/documents/doc/${docId}/raw`, {
+      fetch(`${API_PREFIX}/documents/doc/${docId}/raw`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
         .then((r) => r.blob())

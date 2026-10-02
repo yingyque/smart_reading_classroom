@@ -12,7 +12,19 @@ import { registerChatHandlers } from './sockets/chat';
 const app = express();
 const server = http.createServer(app);
 
-app.use(cors({ origin: config.clientOrigin, credentials: true }));
+// CORS 白名单：允许配置的前端来源；无 Origin（同源/服务器直连）放行
+const corsOrigin = (
+  origin: string | undefined,
+  cb: (err: Error | null, allow?: boolean) => void,
+) => {
+  if (!origin || config.clientOrigins.includes(origin)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`CORS 拒绝来源: ${origin}`));
+  }
+};
+
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
@@ -33,11 +45,12 @@ app.use(
 );
 
 const io = new Server(server, {
-  cors: { origin: config.clientOrigin, credentials: true },
+  cors: { origin: corsOrigin, credentials: true },
 });
 registerChatHandlers(io);
 
-server.listen(config.port, () => {
-  console.log(`\n智慧阅读平台后端已启动: http://localhost:${config.port}`);
+// 云平台（Render 等）要求监听 0.0.0.0 和平台分配的 PORT
+server.listen(config.port, '0.0.0.0', () => {
+  console.log(`\n智慧阅读平台后端已启动, 端口: ${config.port}`);
   console.log(`AI 接口状态: ${isAiConfigured() ? '已配置 ✓' : '未配置（请在 .env 填写 AI_BASE_URL / AI_API_KEY）'}\n`);
 });

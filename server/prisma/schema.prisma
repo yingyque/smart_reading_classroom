@@ -4,11 +4,11 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// SQLite 不支持原生 enum，用 String 承载并在应用层用 TS 联合类型约束
+// 用 String 承载角色/消息类型，并在应用层用 TS 联合类型约束
 // Role 取值：TEACHER | STUDENT
 // MessageType 取值：PEER（学生↔学生）| AI（学生↔AI）
 
@@ -71,7 +71,7 @@ model Document {
   fileName    String
   fileType    String // pdf | docx | txt
   filePath    String // 本地存储路径
-  content     String // 抽取出的纯文本（用于 AI 上下文与分析）
+  content     String @db.Text // 抽取出的纯文本（用于 AI 上下文与分析）
   createdAt   DateTime @default(now())
 
   classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
@@ -86,7 +86,7 @@ model Message {
   documentId  String?
   senderId    String // 发起学生（AI 回复也归属到触发它的学生）
   isAiReply   Boolean     @default(false) // true 表示该条为 AI 的回复
-  content     String
+  content     String      @db.Text
   createdAt   DateTime    @default(now())
 
   classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)

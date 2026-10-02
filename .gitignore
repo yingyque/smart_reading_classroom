@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 *.log
+*.tsbuildinfo
 
 # 环境变量与密钥
 .env

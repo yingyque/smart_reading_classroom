@@ -1,0 +1,41 @@
+# Render 部署蓝图（Blueprint）
+# 在 Render 控制台用 "New +" -> "Blueprint" 选中本仓库即可按此文件自动创建：
+#   1) 一个 PostgreSQL 数据库
+#   2) 一个 Node Web 服务（后端 Express + Socket.io）
+#
+# 注意：AI_API_KEY 等敏感信息不写在此文件里，部署后在 Render 控制台手动填入（sync: false）。
+
+databases:
+  - name: smart-reading-db
+    plan: free
+    databaseName: smart_reading
+    user: smart_reading
+
+services:
+  - type: web
+    name: smart-reading-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smart-reading-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLIENT_ORIGIN
+        sync: false # 部署后填你的 Vercel 前端域名
+      - key: AI_BASE_URL
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        sync: false
+      - key: AI_CONTEXT_CHAR_LIMIT
+        value: "6000"
+      - key: AI_TIMEOUT_MS
+        value: "60000"

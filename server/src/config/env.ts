@@ -13,9 +13,18 @@ function required(name: string, fallback?: string): string {
   return value;
 }
 
+// 支持配置多个前端来源（逗号分隔），用于本地开发 + 线上域名共存
+const rawOrigins = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
+const clientOrigins = rawOrigins
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 export const config = {
   port: Number(process.env.PORT ?? 4000),
-  clientOrigin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173',
+  // 兼容旧用法：单值仍可用；CORS 处用 clientOrigins 做白名单匹配
+  clientOrigin: clientOrigins[0] ?? 'http://localhost:5173',
+  clientOrigins,
   jwtSecret: required('JWT_SECRET', 'dev-insecure-secret-change-me'),
   ai: {
     baseURL: process.env.AI_BASE_URL ?? '',
