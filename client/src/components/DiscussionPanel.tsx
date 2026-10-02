@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Bot, Users, Loader2 } from 'lucide-react';
+import { Send, Bot, Users, Loader2, KeyRound, CheckCircle2 } from 'lucide-react';
 import { Socket } from 'socket.io-client';
 import { api } from '../lib/api';
 import { ChatMessage, MessageType, User } from '../types';
@@ -13,12 +13,23 @@ interface Props {
   me: User;
 }
 
+interface WorkspaceState {
+  exists: boolean;
+  status: string | null;
+  keyActivated: boolean;
+  keyMask?: string | null;
+}
+
 export default function DiscussionPanel({ socket, classroomId, groupId, documentId, me }: Props) {
   const [tab, setTab] = useState<MessageType>('PEER');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [aiTyping, setAiTyping] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [wsState, setWsState] = useState<WorkspaceState | null>(null);
+  const [keyInput, setKeyInput] = useState('');
+  const [keySubmitting, setKeySubmitting] = useState(false);
+  const [keyError, setKeyError] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // 加载历史消息
@@ -30,6 +41,32 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
       .catch((err) => console.error('加载历史失败', err))
       .finally(() => setLoading(false));
   }, [classroomId, groupId]);
+
+  // 加载个人 AI 工作台状态
+  useEffect(() => {
+    api
+      .get(`/workspaces/${classroomId}/me`)
+      .then((res) => setWsState(res.data))
+      .catch(() => setWsState({ exists: false, status: null, keyActivated: false }));
+  }, [classroomId]);
+
+  // 提交 AI Key 激活
+  const submitKey = async () => {
+    const key = keyInput.trim();
+    if (!key) return;
+    setKeySubmitting(true);
+    setKeyError('');
+    try {
+      const res = await api.post(`/workspaces/${classroomId}/key`, { key });
+      setWsState(res.data);
+      setKeyInput('');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setKeyError(msg || '激活失败，请检查 Key 是否正确');
+    } finally {
+      setKeySubmitting(false);
+    }
+  };
 
   // 加入房间 + 监听
   useEffect(() => {
@@ -112,6 +149,45 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
         )}
       </div>
 
+      {/* AI Key 激活区（仅 AI Tab 且未激活时显示） */}
+      {tab === 'AI' && wsState && !wsState.keyActivated && (
+        <div className="border-t border-violet-500/20 bg-violet-500/5 p-4">
+          <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-violet-600">
+            <KeyRound size={15} />
+            激活个人 AI 助手
+          </div>
+          <p className="mb-2 text-xs leading-relaxed text-ink-500">
+            输入教师发放的 AI Key，即可启动你的专属 AI 容器并开始讨论。Key 仅用于激活你自己的 AI 助手。
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submitKey()}
+              placeholder="粘贴教师发放的 Key（sk-…）"
+              className="flex-1 rounded-lg border border-ink-900/10 bg-white px-3 py-1.5 text-sm outline-none focus:border-violet-500"
+            />
+            <button
+              onClick={submitKey}
+              disabled={!keyInput.trim() || keySubmitting}
+              className="rounded-lg bg-violet-500 px-4 py-1.5 text-sm font-semibold text-white transition-all hover:brightness-110 active:scale-95 disabled:opacity-40"
+            >
+              {keySubmitting ? <Loader2 size={16} className="animate-spin" /> : '激活'}
+            </button>
+          </div>
+          {keyError && <p className="mt-2 text-xs text-red-500">{keyError}</p>}
+        </div>
+      )}
+
+      {/* AI 已激活状态提示 */}
+      {tab === 'AI' && wsState?.keyActivated && (
+        <div className="flex items-center gap-1.5 border-t border-ink-900/5 bg-emerald-500/5 px-4 py-1.5 text-xs text-emerald-600">
+          <CheckCircle2 size={13} />
+          个人 AI 助手已激活（{wsState.keyMask ?? 'Key 已配置'}），发消息即可与 AI 讨论
+        </div>
+      )}
+
       {/* 输入区 */}
       <div className="border-t border-ink-900/5 p-3">
         <div className="flex items-end gap-2 rounded-xl border border-ink-900/10 bg-[#f7f8fa] p-2 focus-within:border-brand-500">
@@ -125,12 +201,12 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
               }
             }}
             rows={1}
-            placeholder={tab === 'PEER' ? '对小组成员说点什么…' : '向 AI 提问…'}
+            placeholder={tab === 'PEER' ? '对小组成员说点什么…' : wsState?.keyActivated ? '向 AI 提问…' : '请先激活 AI 助手（输入上方 Key）'}
             className="max-h-28 min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-ink-900 outline-none placeholder:text-ink-500/50"
           />
           <button
             onClick={send}
-            disabled={!input.trim()}
+            disabled={!input.trim() || (tab === 'AI' && !wsState?.keyActivated)}
             className={cn(
               'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white transition-all active:scale-90 disabled:opacity-40',
               tab === 'PEER' ? 'bg-brand-500 hover:bg-brand-600' : 'bg-violet-500 hover:brightness-110',

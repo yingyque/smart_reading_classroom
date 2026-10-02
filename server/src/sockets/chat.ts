@@ -1,7 +1,9 @@
 import { Server, Socket } from 'socket.io';
 import { prisma } from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
-import { generateAiReply, AiContextMessage } from '../services/aiService';
+import { AiContextMessage, buildSystemPrompt } from '../services/aiService';
+import { runCodeBuddy, WorkspacePausedError } from '../services/containerService';
+import { config } from '../config/env';
 import {
   ChatMessage,
   JoinGroupPayload,
@@ -121,16 +123,50 @@ export function registerChatHandlers(io: Server): void {
         .filter((m) => m.id !== userMsg.id)
         .map((m) => ({ role: m.isAiReply ? 'assistant' : 'user', content: m.content }));
 
-      // 3) 调用 AI
-      socket.emit('ai:typing', { groupId: group.id });
-      const reply = await generateAiReply({
-        documentTitle: docTitle,
-        documentContent: docContent,
-        recentMessages,
-        userMessage: content,
-      });
+      // 3) 检查学生是否已激活个人 AI Key
+      const me = await prisma.user.findUnique({ where: { id: user.id } });
+      if (!me?.aiKey) {
+        const hint = await prisma.message.create({
+          data: {
+            type: 'AI',
+            classroomId: group.classroomId,
+            groupId: group.id,
+            documentId: payload.documentId,
+            senderId: user.id,
+            isAiReply: true,
+            content: '你的个人 AI 助手尚未激活：请在「AI 讨论」面板顶部输入教师发放的 Key，激活后即可开始讨论。',
+          },
+        });
+        const hintOut = toChatMessage(hint, 'AI 助手');
+        io.to(roomOf(group.id)).emit('message:new', hintOut);
+        io.to(teacherRoomOf(group.classroomId)).emit('message:new', hintOut);
+        return;
+      }
 
-      // 4) 落库 AI 回复 + 记录使用量
+      // 4) 组装 prompt 并路由到该学生的专属容器（CodeBuddy headless）
+      socket.emit('ai:typing', { groupId: group.id });
+      const docSnippet = (docContent ?? '').slice(0, config.ai.contextCharLimit);
+      const promptParts: string[] = [buildSystemPrompt(docTitle, docSnippet)];
+      for (const m of recentMessages) {
+        promptParts.push(m.role === 'assistant' ? `[AI]：${m.content}` : `[学生]：${m.content}`);
+      }
+      promptParts.push(`[学生]：${content}\n\n请以 AI 讨论助手的身份直接回复上述最新问题。`);
+      const prompt = promptParts.join('\n');
+
+      let replyContent: string;
+      try {
+        replyContent = await runCodeBuddy(group.classroomId, user.id, prompt);
+      } catch (err) {
+        if (err instanceof WorkspacePausedError) {
+          replyContent = '你的 AI 工作台已被教师暂停，暂时无法讨论。请联系教师重新开启。';
+        } else {
+          const e = err as Error & { stderr?: string };
+          console.error('[socket] 容器 AI 调用失败:', e.message, e.stderr ? `stderr=${e.stderr}` : '');
+          replyContent = '抱歉，你的 AI 助手暂时无法回复（容器启动或调用超时）。请稍后重试，若持续失败请联系教师。';
+        }
+      }
+
+      // 5) 落库 AI 回复 + 记录使用量
       const aiMsg = await prisma.message.create({
         data: {
           type: 'AI',
@@ -139,7 +175,7 @@ export function registerChatHandlers(io: Server): void {
           documentId: payload.documentId,
           senderId: user.id,
           isAiReply: true,
-          content: reply.content,
+          content: replyContent,
         },
       });
       await prisma.aiUsage.create({
@@ -148,8 +184,8 @@ export function registerChatHandlers(io: Server): void {
           groupId: group.id,
           userId: user.id,
           documentId: payload.documentId,
-          promptChars: reply.promptChars,
-          replyChars: reply.replyChars,
+          promptChars: prompt.length,
+          replyChars: replyContent.length,
         },
       });
       const aiOut = toChatMessage(aiMsg, 'AI 助手');

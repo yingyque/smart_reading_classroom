@@ -18,6 +18,8 @@ model User {
   email     String   @unique
   password  String
   role      String   @default("STUDENT")
+  // 教师发放的 AI Key（AES-256-GCM 加密存储，格式 iv:tag:ciphertext）
+  aiKey     String?
   createdAt DateTime @default(now())
 
   // 关系
@@ -25,6 +27,7 @@ model User {
   memberships      GroupMember[]
   messages         Message[]
   aiUsages         AiUsage[]
+  workspaces       Workspace[]
 }
 
 model Classroom {
@@ -39,6 +42,7 @@ model Classroom {
   groups    Group[]
   documents Document[]
   messages  Message[]
+  workspaces Workspace[]
 }
 
 model Group {
@@ -113,4 +117,22 @@ model AiUsage {
 
   @@index([classroomId])
   @@index([userId])
+}
+
+// 学生 AI 工作台容器：每 (classroom, student) 一个 CodeBuddy 容器
+// status 取值：CREATED（已创建未运行）| RUNNING（运行中）| STOPPED（闲置停止，可唤醒）
+model Workspace {
+  id            String   @id @default(cuid())
+  classroomId   String
+  userId        String
+  containerName String   @unique // src-ws-{classroomId前8}-{userId前8}
+  status        String   @default("CREATED")
+  lastActiveAt  DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([classroomId, userId])
+  @@index([status, lastActiveAt])
 }

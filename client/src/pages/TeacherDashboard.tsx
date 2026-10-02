@@ -12,10 +12,30 @@ import {
   Copy,
   Check,
   Shuffle,
+  Container,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { Classroom, DocumentLite, Group } from '../types';
+
+interface WorkspaceContainer {
+  id: string;
+  studentName: string;
+  studentEmail: string;
+  containerName: string;
+  status: string;
+  keyActivated: boolean;
+  lastActiveAt: string;
+  createdAt: string;
+}
+
+interface WorkspaceSummary {
+  total: number;
+  running: number;
+  containers: WorkspaceContainer[];
+}
 
 export default function TeacherDashboard() {
   const navigate = useNavigate();
@@ -25,10 +45,12 @@ export default function TeacherDashboard() {
   const [documents, setDocuments] = useState<DocumentLite[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupCount, setGroupCount] = useState(4);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary | null>(null);
   const [newName, setNewName] = useState('');
   const [copied, setCopied] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [grouping, setGrouping] = useState(false);
+  const [wsBusy, setWsBusy] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadClassrooms = async () => {
@@ -44,13 +66,49 @@ export default function TeacherDashboard() {
 
   const selectClass = async (c: Classroom) => {
     setActive(c);
-    const [docRes, detailRes] = await Promise.all([
+    const [docRes, detailRes, wsRes] = await Promise.all([
       api.get(`/documents/${c.id}`),
       api.get(`/classrooms/${c.id}`),
+      api.get(`/workspaces/${c.id}`).catch(() => null),
     ]);
     setDocuments(docRes.data);
     setGroups(detailRes.data.groups || []);
     setGroupCount(c.groupCount || 4);
+    setWorkspaces(wsRes?.data ?? null);
+  };
+
+  const refreshWorkspaces = async () => {
+    if (!active) return;
+    const res = await api.get(`/workspaces/${active.id}`).catch(() => null);
+    setWorkspaces(res?.data ?? null);
+  };
+
+  const toggleWorkspace = async (c: WorkspaceContainer, pause: boolean) => {
+    if (!active) return;
+    setWsBusy(c.id);
+    try {
+      await api.post(`/workspaces/${active.id}/${c.id}/${pause ? 'pause' : 'resume'}`);
+      await refreshWorkspaces();
+    } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      alert(`操作失败：${msg || '请稍后重试'}`);
+    } finally {
+      setWsBusy(null);
+    }
+  };
+
+  const toggleAll = async (pause: boolean) => {
+    if (!active) return;
+    setWsBusy('all');
+    try {
+      await api.post(`/workspaces/${active.id}/pause-all`, { paused: pause });
+      await refreshWorkspaces();
+    } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      alert(`操作失败：${msg || '请稍后重试'}`);
+    } finally {
+      setWsBusy(null);
+    }
   };
 
   const createClass = async () => {
@@ -275,10 +333,115 @@ export default function TeacherDashboard() {
                   ))}
                 </div>
               </section>
+
+              {/* AI 工作台容器 */}
+              <section className="rounded-2xl border border-ink-900/5 bg-white p-6 shadow-soft">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <h2 className="flex items-center gap-2 font-semibold text-ink-900">
+                    <Container size={18} className="text-violet-500" /> AI 工作台容器
+                  </h2>
+                  {!!workspaces?.containers.length && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => toggleAll(false)}
+                        disabled={wsBusy !== null}
+                        className="flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                      >
+                        <Play size={13} /> 全部开启
+                      </button>
+                      <button
+                        onClick={() => toggleAll(true)}
+                        disabled={wsBusy !== null}
+                        className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        <Pause size={13} /> 全部暂停
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <p className="mb-4 text-xs text-ink-500">
+                  每名学生加入课堂后自动创建专属 AI 容器（容器数 = 已加入学生数）。学生输入你发放的 Key 后激活。
+                  容器启动后<strong className="text-ink-700">常驻运行、不会自动休眠</strong>，由你在此手动暂停或开启；暂停期间学生提问会收到提示。
+                </p>
+                <div className="mb-4 flex gap-3">
+                  <div className="flex-1 rounded-xl bg-violet-500/5 p-3 text-center">
+                    <div className="text-2xl font-bold text-violet-600">{workspaces?.total ?? 0}</div>
+                    <div className="text-xs text-ink-500">容器总数（学生数）</div>
+                  </div>
+                  <div className="flex-1 rounded-xl bg-emerald-500/5 p-3 text-center">
+                    <div className="text-2xl font-bold text-emerald-600">{workspaces?.running ?? 0}</div>
+                    <div className="text-xs text-ink-500">运行中</div>
+                  </div>
+                  <div className="flex-1 rounded-xl bg-amber-500/5 p-3 text-center">
+                    <div className="text-2xl font-bold text-amber-600">
+                      {workspaces?.containers.filter((c) => c.keyActivated).length ?? 0}
+                    </div>
+                    <div className="text-xs text-ink-500">已激活 Key</div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {workspaces?.containers.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between rounded-lg border border-ink-900/5 px-4 py-2.5">
+                      <div className="flex items-center gap-3">
+                        <StatusDot status={c.status} />
+                        <div>
+                          <div className="text-sm font-medium text-ink-900">{c.studentName}</div>
+                          <div className="font-mono text-xs text-ink-500">{c.containerName}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className={c.keyActivated ? 'text-emerald-600' : 'text-ink-500'}>
+                          {c.keyActivated ? 'Key 已激活' : 'Key 未激活'}
+                        </span>
+                        <span className="hidden text-ink-500 sm:inline">
+                          活跃于 {new Date(c.lastActiveAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        {c.status === 'RUNNING' ? (
+                          <button
+                            onClick={() => toggleWorkspace(c, true)}
+                            disabled={wsBusy !== null}
+                            className="flex items-center gap-1 rounded-lg border border-amber-200 px-2.5 py-1 font-medium text-amber-700 transition hover:bg-amber-50 disabled:opacity-50"
+                          >
+                            {wsBusy === c.id ? <Loader2 size={13} className="animate-spin" /> : <Pause size={13} />} 暂停
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => toggleWorkspace(c, false)}
+                            disabled={wsBusy !== null}
+                            className="flex items-center gap-1 rounded-lg border border-emerald-200 px-2.5 py-1 font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50"
+                          >
+                            {wsBusy === c.id ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} 开启
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {workspaces && workspaces.containers.length === 0 && (
+                    <p className="py-3 text-center text-sm text-ink-500">还没有学生加入课堂</p>
+                  )}
+                </div>
+              </section>
             </>
           )}
         </main>
       </div>
     </div>
+  );
+}
+
+function StatusDot({ status }: { status: string }) {
+  const color =
+    status === 'RUNNING'
+      ? 'bg-emerald-500'
+      : status === 'PAUSED'
+        ? 'bg-amber-400'
+        : 'bg-ink-900/20';
+  const label =
+    status === 'RUNNING' ? '运行中' : status === 'PAUSED' ? '已暂停' : '待启动';
+  return (
+    <span className="flex items-center gap-1.5" title={label}>
+      <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
+      <span className="text-xs text-ink-500">{label}</span>
+    </span>
   );
 }
