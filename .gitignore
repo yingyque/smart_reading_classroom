@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+*.log
+
+# 环境变量与密钥
+.env
+server/.env
+client/.env
+
+# SQLite 数据库
+server/prisma/dev.db
+server/prisma/dev.db-journal
+*.db
+*.db-journal
+
+# 上传的文献
+server/uploads/
+
+# 系统文件
+.DS_Store

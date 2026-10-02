@@ -1,0 +1,16 @@
+{
+  "name": "smart-reading-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "智慧阅读智能平台 - 研究生课堂文献阅读与AI协作讨论",
+  "scripts": {
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
+    "db:setup": "npm --prefix server run db:push",
+    "dev": "concurrently -n server,client -c blue,green \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
