@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authRequired, roleRequired, AuthedRequest } from '../middleware/auth';
+import { ensureWorkspace } from '../services/containerService';
 
 const router = Router();
 
@@ -50,6 +51,11 @@ router.post('/join', authRequired, async (req: AuthedRequest, res: Response) => 
   });
   if (!classroom) return res.status(404).json({ error: '课堂码无效' });
 
+  // 为该学生创建专属 AI 工作台容器（幂等；失败不阻断加入流程）
+  ensureWorkspace(classroom.id, req.user!.id).catch((err) => {
+    console.error('[classroom] 创建工作台容器失败:', (err as Error).message);
+  });
+
   // 已在某组则直接返回
   const existing = await prisma.groupMember.findFirst({
     where: { userId: req.user!.id, group: { classroomId: classroom.id } },
@@ -96,12 +102,21 @@ router.post('/:id/group', authRequired, roleRequired('TEACHER'), async (req: Aut
     return res.status(403).json({ error: '无权操作此课堂' });
   }
 
-  // 收集课堂内所有学生（已加入过的成员）
-  const existingMembers = await prisma.groupMember.findMany({
-    where: { group: { classroomId } },
-    select: { userId: true },
-  });
-  const studentIds = Array.from(new Set(existingMembers.map((m) => m.userId)));
+  // 收集课堂内所有学生：已分组的成员 + 已创建工作台容器的加入者
+  // （学生在教师首次分组前加入时没有 GroupMember 记录，需从 Workspace 补齐）
+  const [existingMembers, workspaceUsers] = await Promise.all([
+    prisma.groupMember.findMany({
+      where: { group: { classroomId } },
+      select: { userId: true },
+    }),
+    prisma.workspace.findMany({
+      where: { classroomId },
+      select: { userId: true },
+    }),
+  ]);
+  const studentIds = Array.from(
+    new Set([...existingMembers, ...workspaceUsers].map((m) => m.userId)),
+  );
 
   // 清除旧分组
   await prisma.group.deleteMany({ where: { classroomId } });

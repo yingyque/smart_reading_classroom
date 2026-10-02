@@ -69,7 +69,7 @@ export async function generateAiReply(params: {
   }
 }
 
-function buildSystemPrompt(title: string | undefined, docSnippet: string): string {
+export function buildSystemPrompt(title: string | undefined, docSnippet: string): string {
   const base =
     '你是研究生课堂「智慧阅读」平台中的 AI 讨论助手。请基于学生正在阅读的文献，用严谨、启发式、简洁的中文与学生讨论，帮助他们深入理解文献、提出批判性问题，而不是直接给出结论性答案。';
   if (!docSnippet) return base;

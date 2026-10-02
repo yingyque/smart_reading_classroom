@@ -7,6 +7,7 @@ import authRoutes from './routes/auth';
 import classroomRoutes from './routes/classroom';
 import documentRoutes from './routes/documents';
 import analyticsRoutes from './routes/analytics';
+import workspaceRoutes from './routes/workspaces';
 import { registerChatHandlers } from './sockets/chat';
 
 const app = express();
@@ -35,6 +36,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/classrooms', classroomRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/workspaces', workspaceRoutes);
 
 // 统一错误处理（含 multer 错误）
 app.use(
@@ -53,4 +55,5 @@ registerChatHandlers(io);
 server.listen(config.port, '0.0.0.0', () => {
   console.log(`\n智慧阅读平台后端已启动, 端口: ${config.port}`);
   console.log(`AI 接口状态: ${isAiConfigured() ? '已配置 ✓' : '未配置（请在 .env 填写 AI_BASE_URL / AI_API_KEY）'}\n`);
+  // 学生 AI 容器常驻运行，暂停/开启完全由教师在端上控制
 });

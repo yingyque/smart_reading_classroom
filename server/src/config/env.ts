@@ -33,6 +33,15 @@ export const config = {
     contextCharLimit: Number(process.env.AI_CONTEXT_CHAR_LIMIT ?? 6000),
     timeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 60000),
   },
+  workspace: {
+    // 学生工作台容器镜像
+    image: process.env.WORKSPACE_IMAGE ?? 'smart-reading-workspace:latest',
+    // 预制的 AI 接口字段（学生只需输入 key）
+    aiBaseURL: process.env.WORKSPACE_AI_BASE_URL || process.env.AI_BASE_URL || '',
+    aiModel: process.env.WORKSPACE_AI_MODEL || process.env.AI_MODEL || 'glm-5',
+    // 单次 codebuddy exec 超时（长文献上下文较慢，放宽以免被掐断）
+    execTimeoutMs: Number(process.env.WORKSPACE_EXEC_TIMEOUT_MS ?? 300000),
+  },
   uploadDir: path.resolve(__dirname, '../../uploads'),
 };
 
