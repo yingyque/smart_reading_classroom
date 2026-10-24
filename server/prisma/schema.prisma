@@ -20,6 +20,8 @@ model User {
   role      String   @default("STUDENT")
   // 教师发放的 AI Key（AES-256-GCM 加密存储，格式 iv:tag:ciphertext）
   aiKey     String?
+  // Key 指纹（HMAC-SHA256）。注：统一共享 Key 后不再要求唯一（多学生可共用同一指纹）
+  aiKeyHash String?
   createdAt DateTime @default(now())
 
   // 关系

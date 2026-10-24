@@ -31,6 +31,8 @@ services:
       AI_MODEL: ${AI_MODEL:-}
       AI_CONTEXT_CHAR_LIMIT: ${AI_CONTEXT_CHAR_LIMIT:-6000}
       AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-60000}
+      # 学生工作台容器模型（独立于服务端 AI_MODEL）。共享 Key 仅以加密形式存于数据库，不进环境变量
+      WORKSPACE_AI_MODEL: ${WORKSPACE_AI_MODEL:-}
     volumes:
       - server-uploads:/app/uploads
       # 管理学生 AI 工作台容器

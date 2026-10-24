@@ -25,10 +25,24 @@ const STOPWORDS = new Set([
 ]);
 
 function tokenize(text: string): string[] {
-  const words = jieba ? jieba.cut(text) : text.split(/[\s，。！？、；：,.!?;:()\[\]{}"'\n\r]+/);
+  const words = tokenizeRaw(text);
   return words
     .map((w) => w.trim().toLowerCase())
     .filter((w) => w.length > 1 && !STOPWORDS.has(w) && !/^[\d\W_]+$/.test(w));
+}
+
+function tokenizeRaw(text: string): string[] {
+  // nodejieba 的原生模块可能在调用时才暴露运行环境不兼容（如 GLIBC 版本过低），
+  // 此时永久降级为简易分词，避免 buildAnalytics 整体失败
+  if (jieba) {
+    try {
+      return jieba.cut(text);
+    } catch (err) {
+      console.warn('[analytics] nodejieba 不可用，已切换为简易分词:', (err as Error).message);
+      jieba = null;
+    }
+  }
+  return text.split(/[\s，。！？、；：,.!?;:()\[\]{}"'\n\r]+/);
 }
 
 export async function buildAnalytics(classroomId: string): Promise<AnalyticsResult> {

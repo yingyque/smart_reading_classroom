@@ -34,7 +34,15 @@ router.post('/:classroomId/key', authRequired, async (req: AuthedRequest, res: R
   if (!classroom) return res.status(404).json({ error: '课堂不存在' });
 
   await ensureWorkspace(classroomId, req.user!.id);
-  await activateKey(req.user!.id, plain);
+  try {
+    await activateKey(req.user!.id, plain);
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (msg === '该 AI Key 已被其他学生使用') {
+      return res.status(409).json({ error: msg });
+    }
+    return res.status(500).json({ error: msg || 'Key 激活失败' });
+  }
 
   const state = await getByUser(classroomId, req.user!.id);
   return res.json({ ...state, keyMask: maskKey(plain) });

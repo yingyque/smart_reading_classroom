@@ -1,4 +1,4 @@
-export type Role = 'TEACHER' | 'STUDENT';
+export type Role = 'ADMIN' | 'TEACHER' | 'STUDENT';
 export type MessageType = 'PEER' | 'AI';
 
 export interface User {

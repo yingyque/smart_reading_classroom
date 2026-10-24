@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { signToken, authRequired, AuthedRequest } from '../middleware/auth';
 import { Role } from '../types';
+import { config } from '../config/env';
+import { encryptKey, keyFingerprint } from '../services/cryptoService';
 
 const router = Router();
 
@@ -22,9 +24,23 @@ router.post('/register', async (req: Request, res: Response) => {
     return res.status(409).json({ error: '该邮箱已被注册' });
   }
   const hashed = await bcrypt.hash(password, 10);
-  const user = await prisma.user.create({
-    data: { name, email, password: hashed, role: role === 'TEACHER' ? 'TEACHER' : 'STUDENT' },
-  });
+  const resolvedRole: Role = role === 'TEACHER' ? 'TEACHER' : 'STUDENT';
+  const data: {
+    name: string;
+    email: string;
+    password: string;
+    role: Role;
+    aiKey?: string;
+    aiKeyHash?: string;
+  } = { name, email, password: hashed, role: resolvedRole };
+
+  // 学生端统一共享 Key：注册时自动分配，免去手动输入
+  if (resolvedRole === 'STUDENT' && config.workspace.apiKey) {
+    data.aiKey = encryptKey(config.workspace.apiKey);
+    data.aiKeyHash = keyFingerprint(config.workspace.apiKey);
+  }
+
+  const user = await prisma.user.create({ data });
   const token = signToken({ id: user.id, role: user.role as Role });
   return res.json({
     token,

@@ -1,6 +1,6 @@
 // 共享类型定义：角色、消息、分析结果结构
 
-export type Role = 'TEACHER' | 'STUDENT';
+export type Role = 'ADMIN' | 'TEACHER' | 'STUDENT';
 
 export type MessageType = 'PEER' | 'AI';
 

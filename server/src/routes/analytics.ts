@@ -36,7 +36,7 @@ router.get('/:classroomId/messages/:groupId', authRequired, async (req: AuthedRe
       groupId: m.groupId,
       documentId: m.documentId,
       senderId: m.senderId,
-      senderName: m.sender.name,
+      senderName: m.isAiReply ? 'AI 助手' : m.sender.name,
       isAiReply: m.isAiReply,
       content: m.content,
       createdAt: m.createdAt.toISOString(),

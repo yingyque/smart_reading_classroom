@@ -34,6 +34,12 @@ export function decryptKey(encrypted: string): string {
   return plain.toString('utf8');
 }
 
+// Key 指纹：相同明文恒定输出，用于「一个 Key 只能被一个学生使用」的唯一性校验
+// （密文带随机 IV，同明文密文不同，无法直接建唯一索引）
+export function keyFingerprint(plain: string): string {
+  return crypto.createHmac('sha256', deriveKey()).update(plain.trim()).digest('hex');
+}
+
 // 教师端/学生端展示用掩码：sk-***xxxx（保留最后 4 位）
 export function maskKey(plain: string): string {
   if (plain.length <= 6) return '***';

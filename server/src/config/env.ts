@@ -38,6 +38,9 @@ export const config = {
     image: process.env.WORKSPACE_IMAGE ?? 'smart-reading-workspace:latest',
     // 预制的 AI 接口字段（学生只需输入 key）
     aiBaseURL: process.env.WORKSPACE_AI_BASE_URL || process.env.AI_BASE_URL || '',
+    // 学生端统一共享 Key（所有学生共用，免输入）。
+    // 注意：明文绝不落盘/不进环境变量，仅以加密形式存于数据库；运行时由启动时从 DB 解密填充（见 index.ts）
+    apiKey: '',
     aiModel: process.env.WORKSPACE_AI_MODEL || process.env.AI_MODEL || 'glm-5',
     // 单次 codebuddy exec 超时（长文献上下文较慢，放宽以免被掐断）
     execTimeoutMs: Number(process.env.WORKSPACE_EXEC_TIMEOUT_MS ?? 300000),

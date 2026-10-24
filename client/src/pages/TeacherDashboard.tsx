@@ -153,11 +153,44 @@ export default function TeacherDashboard() {
     }
   };
 
-  const copyCode = () => {
+  const copyCode = async () => {
     if (!active) return;
-    navigator.clipboard.writeText(active.code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    const text = active.code;
+    let ok = false;
+    // 优先用原生剪贴板（需安全上下文，即 HTTPS 或 localhost）
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch {
+      ok = false;
+    }
+    // HTTP（非安全上下文）下走 execCommand 兜底：用屏幕外定位而非 opacity:0，后者在部分浏览器无法选中复制
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch {
+        ok = false;
+      }
+    }
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } else {
+      alert('复制失败，请手动长按/选择课堂码复制');
+    }
   };
 
   const totalStudents = groups.reduce((s, g) => s + g.members.length, 0);
@@ -360,7 +393,7 @@ export default function TeacherDashboard() {
                   )}
                 </div>
                 <p className="mb-4 text-xs text-ink-500">
-                  每名学生加入课堂后自动创建专属 AI 容器（容器数 = 已加入学生数）。学生输入你发放的 Key 后激活。
+                  每名学生加入课堂后自动创建专属 AI 容器（容器数 = 已加入学生数），AI Key 已由系统统一配置，学生无需自行输入。
                   容器启动后<strong className="text-ink-700">常驻运行、不会自动休眠</strong>，由你在此手动暂停或开启；暂停期间学生提问会收到提示。
                 </p>
                 <div className="mb-4 flex gap-3">

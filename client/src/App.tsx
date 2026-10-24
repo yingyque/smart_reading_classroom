@@ -5,6 +5,7 @@ import TeacherDashboard from './pages/TeacherDashboard';
 import Analytics from './pages/Analytics';
 import StudentHome from './pages/StudentHome';
 import ReadingRoom from './pages/ReadingRoom';
+import AdminDashboard from './pages/AdminDashboard';
 
 function Protected({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -27,7 +28,9 @@ export default function App() {
         path="/"
         element={
           <Protected>
-            {user?.role === 'TEACHER' ? (
+            {user?.role === 'ADMIN' ? (
+              <Navigate to="/shimin" replace />
+            ) : user?.role === 'TEACHER' ? (
               <Navigate to="/teacher" replace />
             ) : (
               <Navigate to="/student" replace />
@@ -48,6 +51,14 @@ export default function App() {
         element={
           <Protected>
             <Analytics />
+          </Protected>
+        }
+      />
+      <Route
+        path="/shimin"
+        element={
+          <Protected>
+            <AdminDashboard />
           </Protected>
         }
       />

@@ -123,7 +123,7 @@ export function registerChatHandlers(io: Server): void {
         .filter((m) => m.id !== userMsg.id)
         .map((m) => ({ role: m.isAiReply ? 'assistant' : 'user', content: m.content }));
 
-      // 3) 检查学生是否已激活个人 AI Key
+      // 3) 检查学生是否已配置个人 AI Key（统一共享 Key 已在注册/后台批量写入）
       const me = await prisma.user.findUnique({ where: { id: user.id } });
       if (!me?.aiKey) {
         const hint = await prisma.message.create({
@@ -134,7 +134,7 @@ export function registerChatHandlers(io: Server): void {
             documentId: payload.documentId,
             senderId: user.id,
             isAiReply: true,
-            content: '你的个人 AI 助手尚未激活：请在「AI 讨论」面板顶部输入教师发放的 Key，激活后即可开始讨论。',
+            content: '你的 AI 助手尚未就绪，暂时无法讨论。请联系教师协助。',
           },
         });
         const hintOut = toChatMessage(hint, 'AI 助手');
@@ -160,9 +160,12 @@ export function registerChatHandlers(io: Server): void {
         if (err instanceof WorkspacePausedError) {
           replyContent = '你的 AI 工作台已被教师暂停，暂时无法讨论。请联系教师重新开启。';
         } else {
-          const e = err as Error & { stderr?: string };
+          const e = err as Error & { stderr?: string; isAiError?: boolean };
           console.error('[socket] 容器 AI 调用失败:', e.message, e.stderr ? `stderr=${e.stderr}` : '');
-          replyContent = '抱歉，你的 AI 助手暂时无法回复（容器启动或调用超时）。请稍后重试，若持续失败请联系教师。';
+          // 把 codebuddy 的真实错误（额度/鉴权/模型不可用）直接透传给用户，便于排查
+          replyContent = e.isAiError && e.message
+            ? e.message
+            : '抱歉，你的 AI 助手暂时无法回复（容器启动或调用超时）。请稍后重试，若持续失败请联系教师。';
         }
       }
 

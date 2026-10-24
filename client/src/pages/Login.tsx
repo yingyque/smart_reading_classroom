@@ -29,7 +29,8 @@ export default function Login() {
     try {
       const res = await api.post(url, body);
       setAuth(res.data.token, res.data.user);
-      navigate(res.data.user.role === 'TEACHER' ? '/teacher' : '/student');
+      const role = res.data.user.role;
+      navigate(role === 'ADMIN' ? '/shimin' : role === 'TEACHER' ? '/teacher' : '/student');
     } catch (err: any) {
       console.error('认证失败', err);
       setError(err.response?.data?.error || '操作失败，请重试');
