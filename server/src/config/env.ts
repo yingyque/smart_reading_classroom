@@ -44,6 +44,10 @@ export const config = {
     aiModel: process.env.WORKSPACE_AI_MODEL || process.env.AI_MODEL || 'glm-5',
     // 单次 codebuddy exec 超时（长文献上下文较慢，放宽以免被掐断）
     execTimeoutMs: Number(process.env.WORKSPACE_EXEC_TIMEOUT_MS ?? 300000),
+    // 全局并发 exec 上限：每个 exec 峰值 ~300MB，3.5G 机器安全值 6，8G 机器可设 12
+    maxConcurrent: Number(process.env.WORKSPACE_MAX_CONCURRENT ?? 6),
+    // 排队等待上限：超时提示用户稍后再试，不无限挂住
+    queueWaitMs: Number(process.env.WORKSPACE_QUEUE_WAIT_MS ?? 180000),
   },
   uploadDir: path.resolve(__dirname, '../../uploads'),
 };

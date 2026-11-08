@@ -18,6 +18,8 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [aiTyping, setAiTyping] = useState(false);
+  // 排队位次（null = 不在排队）：全班并发高时 AI 请求进全局队列，显示位次
+  const [queuePos, setQueuePos] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -38,24 +40,35 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
     const onNew = (msg: ChatMessage) => {
       if (msg.groupId !== groupId) return;
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
-      if (msg.type === 'AI' && msg.isAiReply) setAiTyping(false);
+      if (msg.type === 'AI' && msg.isAiReply) {
+        setAiTyping(false);
+        setQueuePos(null);
+      }
     };
     const onTyping = (p: { groupId: string }) => {
-      if (p.groupId === groupId) setAiTyping(true);
+      if (p.groupId === groupId) {
+        setAiTyping(true);
+        setQueuePos(null);
+      }
+    };
+    const onQueued = (p: { groupId: string; position: number }) => {
+      if (p.groupId === groupId) setQueuePos(p.position);
     };
 
     socket.on('message:new', onNew);
     socket.on('ai:typing', onTyping);
+    socket.on('ai:queued', onQueued);
     return () => {
       socket.off('message:new', onNew);
       socket.off('ai:typing', onTyping);
+      socket.off('ai:queued', onQueued);
     };
   }, [socket, groupId]);
 
   // 自动滚底
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, aiTyping, tab]);
+  }, [messages, aiTyping, queuePos, tab]);
 
   const send = () => {
     const content = input.trim();
@@ -101,7 +114,16 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
         ) : (
           shown.map((m) => <Bubble key={m.id} msg={m} mine={m.senderId === me.id && !m.isAiReply} />)
         )}
-        {tab === 'AI' && aiTyping && (
+        {tab === 'AI' && queuePos !== null && (
+          <div className="flex items-center gap-2 text-sm text-violet-500">
+            <Bot size={16} />
+            <span className="flex gap-1">
+              <Dot /> <Dot delay="0.15s" /> <Dot delay="0.3s" />
+            </span>
+            提问人数较多，排队中，第 {queuePos} 位…
+          </div>
+        )}
+        {tab === 'AI' && aiTyping && queuePos === null && (
           <div className="flex items-center gap-2 text-sm text-violet-500">
             <Bot size={16} />
             <span className="flex gap-1">

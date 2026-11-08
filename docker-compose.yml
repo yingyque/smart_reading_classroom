@@ -33,6 +33,10 @@ services:
       AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-60000}
       # 学生工作台容器模型（独立于服务端 AI_MODEL）。共享 Key 仅以加密形式存于数据库，不进环境变量
       WORKSPACE_AI_MODEL: ${WORKSPACE_AI_MODEL:-}
+      # 全局并发 exec 上限（每个峰值 ~300MB）：3.5G 机器设 6，8G 机器可设 12
+      WORKSPACE_MAX_CONCURRENT: ${WORKSPACE_MAX_CONCURRENT:-6}
+      # 排队等待上限（毫秒）
+      WORKSPACE_QUEUE_WAIT_MS: ${WORKSPACE_QUEUE_WAIT_MS:-180000}
     volumes:
       - server-uploads:/app/uploads
       # 管理学生 AI 工作台容器

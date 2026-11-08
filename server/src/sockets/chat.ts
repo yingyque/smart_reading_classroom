@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
 import { AiContextMessage, buildSystemPrompt } from '../services/aiService';
 import { runCodeBuddy, WorkspacePausedError } from '../services/containerService';
+import { QueueTimeoutError } from '../services/execQueue';
 import { config } from '../config/env';
 import {
   ChatMessage,
@@ -20,6 +21,9 @@ interface SocketUser extends JwtPayload {
 
 const roomOf = (groupId: string) => `group:${groupId}`;
 const teacherRoomOf = (classroomId: string) => `teacher:${classroomId}`;
+
+// 有待处理 AI 请求（排队中或执行中）的学生：防止一个学生连发多条把全局队列占满
+const pendingAiUsers = new Set<string>();
 
 export function registerChatHandlers(io: Server): void {
   // 握手鉴权
@@ -143,7 +147,26 @@ export function registerChatHandlers(io: Server): void {
         return;
       }
 
-      // 4) 组装 prompt 并路由到该学生的专属容器（CodeBuddy headless）
+      // 4) 单用户防刷：上一问还在排队/执行中时直接提示，不占全局并发坑
+      if (pendingAiUsers.has(user.id)) {
+        const busyHint = await prisma.message.create({
+          data: {
+            type: 'AI',
+            classroomId: group.classroomId,
+            groupId: group.id,
+            documentId: payload.documentId,
+            senderId: user.id,
+            isAiReply: true,
+            content: '你的上一个问题还在处理中，请等回复后再提新问题。',
+          },
+        });
+        const busyOut = toChatMessage(busyHint, 'AI 助手');
+        io.to(roomOf(group.id)).emit('message:new', busyOut);
+        io.to(teacherRoomOf(group.classroomId)).emit('message:new', busyOut);
+        return;
+      }
+
+      // 5) 组装 prompt 并路由到该学生的专属容器（CodeBuddy headless）
       socket.emit('ai:typing', { groupId: group.id });
       const docSnippet = (docContent ?? '').slice(0, config.ai.contextCharLimit);
       const promptParts: string[] = [buildSystemPrompt(docTitle, docSnippet)];
@@ -154,11 +177,22 @@ export function registerChatHandlers(io: Server): void {
       const prompt = promptParts.join('\n');
 
       let replyContent: string;
+      pendingAiUsers.add(user.id);
       try {
-        replyContent = await runCodeBuddy(group.classroomId, user.id, prompt);
+        replyContent = await runCodeBuddy(group.classroomId, user.id, prompt, (pos) => {
+          if (pos > 0) {
+            // 排队中：告知位次（只发给提问的学生本人）
+            socket.emit('ai:queued', { groupId: group.id, position: pos });
+          } else {
+            // 获得执行权：从「排队中」切回「思考中」
+            socket.emit('ai:typing', { groupId: group.id });
+          }
+        });
       } catch (err) {
         if (err instanceof WorkspacePausedError) {
           replyContent = '你的 AI 工作台已被教师暂停，暂时无法讨论。请联系教师重新开启。';
+        } else if (err instanceof QueueTimeoutError) {
+          replyContent = '当前提问人数较多，你的问题还在排队中。请稍后重新发送试试。';
         } else {
           const e = err as Error & { stderr?: string; isAiError?: boolean };
           console.error('[socket] 容器 AI 调用失败:', e.message, e.stderr ? `stderr=${e.stderr}` : '');
@@ -167,9 +201,11 @@ export function registerChatHandlers(io: Server): void {
             ? e.message
             : '抱歉，你的 AI 助手暂时无法回复（容器启动或调用超时）。请稍后重试，若持续失败请联系教师。';
         }
+      } finally {
+        pendingAiUsers.delete(user.id);
       }
 
-      // 5) 落库 AI 回复 + 记录使用量
+      // 6) 落库 AI 回复 + 记录使用量
       const aiMsg = await prisma.message.create({
         data: {
           type: 'AI',

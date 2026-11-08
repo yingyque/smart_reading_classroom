@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import { config } from '../config/env';
 import { prisma } from '../lib/prisma';
 import { decryptKey, encryptKey, keyFingerprint } from './cryptoService';
+import { runWithSlot } from './execQueue';
 
 // 学生 AI 工作台容器编排：通过 docker CLI（execFile 数组传参，无 shell 注入风险）
 // 容器内安装 CodeBuddy CLI，由平台通过 docker exec headless 调用
@@ -175,10 +176,13 @@ export async function activateKey(userId: string, key: string): Promise<void> {
 
 // 在学生容器内 headless 调用 CodeBuddy 生成回复
 // 容器一旦启动便常驻（无闲置自动停止），仅教师可暂停/开启
+// 全局并发队列：每个 exec 峰值 ~300MB，全班同时提问必须排队；
+// onQueuePosition(0) 表示已获得执行权，>0 为排队位次（供前端展示）
 export async function runCodeBuddy(
   classroomId: string,
   userId: string,
   prompt: string,
+  onQueuePosition?: (pos: number) => void,
 ): Promise<string> {
   const ws = await ensureWorkspace(classroomId, userId);
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -189,45 +193,51 @@ export async function runCodeBuddy(
     throw new WorkspacePausedError();
   }
 
-  // 首次使用（或容器意外退出）时唤醒，之后保持常驻
-  if (ws.status !== WORKSPACE_STATUS.RUNNING || !(await isRunning(ws.containerName))) {
-    await docker(['start', ws.containerName]);
-    await prisma.workspace.update({
-      where: { id: ws.id },
-      data: { status: WORKSPACE_STATUS.RUNNING, lastActiveAt: new Date() },
-    });
-  }
+  return runWithSlot(
+    async () => {
+      // 首次使用（或容器意外退出）时唤醒，之后保持常驻。
+      // start 也必须在并发坑位内：50 个容器同时 start 同样是资源冲击
+      if (ws.status !== WORKSPACE_STATUS.RUNNING || !(await isRunning(ws.containerName))) {
+        await docker(['start', ws.containerName]);
+        await prisma.workspace.update({
+          where: { id: ws.id },
+          data: { status: WORKSPACE_STATUS.RUNNING, lastActiveAt: new Date() },
+        });
+      }
 
-  try {
-    const { stdout, stderr } = await docker(
-      [
-        'exec',
-        // 覆盖容器创建时固化的模型，保证配置变更对已有容器立即生效
-        ...modelEnvArgs(),
-        // 堆上限压在 448m 容器限额以内：让 Node 先 GC/报 OOM，而不是整个容器被内核 kill
-        ...nodeOptsArgs(),
-        ws.containerName,
-        'codebuddy', '-p', prompt, '--output-format', 'text', '-y',
-      ],
-      config.workspace.execTimeoutMs,
-    );
-    const out = stdout.trim();
-    if (out) return out;
-    // codebuddy 把真实错误（额度/鉴权/模型不可用等）输出到 stderr 且 stdout 为空，
-    // 这里把真实错误抛给上层，避免向用户展示误导性的「AI 未返回内容」
-    const detail = stderr.trim();
-    if (detail) {
-      const e = new Error(detail) as Error & { isAiError?: boolean };
-      e.isAiError = true;
-      throw e;
-    }
-    return '（AI 未返回内容）';
-  } finally {
-    await prisma.workspace.update({
-      where: { id: ws.id },
-      data: { lastActiveAt: new Date() },
-    });
-  }
+      try {
+        const { stdout, stderr } = await docker(
+          [
+            'exec',
+            // 覆盖容器创建时固化的模型，保证配置变更对已有容器立即生效
+            ...modelEnvArgs(),
+            // 堆上限压在 448m 容器限额以内：让 Node 先 GC/报 OOM，而不是整个容器被内核 kill
+            ...nodeOptsArgs(),
+            ws.containerName,
+            'codebuddy', '-p', prompt, '--output-format', 'text', '-y',
+          ],
+          config.workspace.execTimeoutMs,
+        );
+        const out = stdout.trim();
+        if (out) return out;
+        // codebuddy 把真实错误（额度/鉴权/模型不可用等）输出到 stderr 且 stdout 为空，
+        // 这里把真实错误抛给上层，避免向用户展示误导性的「AI 未返回内容」
+        const detail = stderr.trim();
+        if (detail) {
+          const e = new Error(detail) as Error & { isAiError?: boolean };
+          e.isAiError = true;
+          throw e;
+        }
+        return '（AI 未返回内容）';
+      } finally {
+        await prisma.workspace.update({
+          where: { id: ws.id },
+          data: { lastActiveAt: new Date() },
+        });
+      }
+    },
+    onQueuePosition,
+  );
 }
 
 // 教师控制：暂停某个学生的容器（容器保留，可随时开启）
