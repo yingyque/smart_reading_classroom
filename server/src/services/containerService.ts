@@ -1,7 +1,8 @@
 import { execFile } from 'child_process';
 import { config } from '../config/env';
 import { prisma } from '../lib/prisma';
-import { decryptKey, encryptKey, keyFingerprint } from './cryptoService';
+import { decryptKey, encryptKey, keyFingerprint, maskKey } from './cryptoService';
+import { isPoolKey, pickSharedKey, poolSize } from './sharedKeyService';
 import { runWithSlot } from './execQueue';
 
 // 学生 AI 工作台容器编排：通过 docker CLI（execFile 数组传参，无 shell 注入风险）
@@ -84,9 +85,7 @@ function buildEnvArgs(plainKey: string | null): string[] {
   };
   if (plainKey) env.CODEBUDDY_API_KEY = plainKey;
   return [...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), ...modelEnvArgs()];
-}
-
-async function createContainer(name: string, plainKey: string | null): Promise<void> {
+}async function createContainer(name: string, plainKey: string | null): Promise<void> {
   await docker([
     'create',
     '--name', name,
@@ -109,9 +108,9 @@ export async function ensureWorkspace(classroomId: string, userId: string): Prom
     where: { classroomId_userId: { classroomId, userId } },
   });
 
-  // 有效 key：优先用学生自己保存的 key，未配置时回退到后端统一共享 key
+  // 有效 key：优先用学生自己保存的 key，未配置时从共享 Key 池轮询取一个
   const owner = await prisma.user.findUnique({ where: { id: userId } });
-  const effectiveKey = owner?.aiKey ? decryptKey(owner.aiKey) : (config.workspace.apiKey || null);
+  const effectiveKey = owner?.aiKey ? decryptKey(owner.aiKey) : (pickSharedKey()?.plain ?? null);
 
   if (!ws) {
     const containerName = containerNameFor(classroomId, userId);
@@ -140,9 +139,8 @@ export async function ensureWorkspace(classroomId: string, userId: string): Prom
 // 一个 Key 只能绑定一个学生：同一账号重复提交同一个 Key 允许（视为更新），他人已占用则拒绝
 export async function activateKey(userId: string, key: string): Promise<void> {
   const fingerprint = keyFingerprint(key);
-  // 后端统一共享 Key：允许所有学生使用，不做唯一性限制
-  const isSharedKey = Boolean(config.workspace.apiKey) && key === config.workspace.apiKey;
-  if (!isSharedKey) {
+  // 共享 Key 池内的 Key：允许所有学生使用，不做唯一性限制
+  if (!isPoolKey(fingerprint)) {
     const owner = await prisma.user.findFirst({ where: { aiKeyHash: fingerprint } });
     if (owner && owner.id !== userId) {
       throw new Error('该 AI Key 已被其他学生使用');
@@ -186,7 +184,7 @@ export async function runCodeBuddy(
 ): Promise<string> {
   const ws = await ensureWorkspace(classroomId, userId);
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user?.aiKey && !config.workspace.apiKey) {
+  if (!user?.aiKey && poolSize() === 0) {
     throw new Error('AI Key 未激活');
   }
   if (ws.status === WORKSPACE_STATUS.PAUSED) {
@@ -206,29 +204,30 @@ export async function runCodeBuddy(
       }
 
       try {
-        const { stdout, stderr } = await docker(
-          [
-            'exec',
-            // 覆盖容器创建时固化的模型，保证配置变更对已有容器立即生效
-            ...modelEnvArgs(),
-            // 堆上限压在 448m 容器限额以内：让 Node 先 GC/报 OOM，而不是整个容器被内核 kill
-            ...nodeOptsArgs(),
-            ws.containerName,
-            'codebuddy', '-p', prompt, '--output-format', 'text', '-y',
-          ],
-          config.workspace.execTimeoutMs,
-        );
-        const out = stdout.trim();
-        if (out) return out;
-        // codebuddy 把真实错误（额度/鉴权/模型不可用等）输出到 stderr 且 stdout 为空，
-        // 这里把真实错误抛给上层，避免向用户展示误导性的「AI 未返回内容」
-        const detail = stderr.trim();
-        if (detail) {
-          const e = new Error(detail) as Error & { isAiError?: boolean };
-          e.isAiError = true;
-          throw e;
+        // Key 在 exec 时注入（对存量容器即时生效）。共享 Key 按轮询分配，
+        // 触发限流时自动切换池内下一个 Key 重试（每个 Key 至多试一次）；
+        // 学生个人 Key（非池内指纹）不参与轮询，限流时直接把错误反馈给学生
+        const personal = user?.aiKey && !isPoolKey(keyFingerprint(decryptKey(user.aiKey)));
+        const maxAttempts = personal ? 1 : Math.max(1, poolSize());
+        const excluded: string[] = [];
+        let lastErr: Error | null = null;
+        for (let i = 0; i < maxAttempts; i++) {
+          const apiKey = resolveRequestKey(user, excluded);
+          if (!apiKey) break;
+          try {
+            console.log(`[container] ${ws.containerName} exec 使用 Key ${maskKey(apiKey)}`);
+            return await execCodeBuddy(ws.containerName, prompt, apiKey);
+          } catch (err) {
+            lastErr = err as Error;
+            if (!personal && isRateLimited(err)) {
+              excluded.push(keyFingerprint(apiKey));
+              console.warn(`[container] Key ${maskKey(apiKey)} 触发限流，切换下一个共享 Key 重试`);
+              continue;
+            }
+            throw err;
+          }
         }
-        return '（AI 未返回内容）';
+        throw lastErr ?? new Error('AI Key 未激活');
       } finally {
         await prisma.workspace.update({
           where: { id: ws.id },
@@ -238,6 +237,50 @@ export async function runCodeBuddy(
     },
     onQueuePosition,
   );
+}
+
+// 本次请求使用的 Key：学生个人 Key（非池内指纹）固定使用；否则从共享池轮询
+function resolveRequestKey(user: { aiKey: string | null } | null, exclude: string[]): string | null {
+  if (user?.aiKey) {
+    const plain = decryptKey(user.aiKey);
+    if (!isPoolKey(keyFingerprint(plain))) return plain;
+  }
+  return pickSharedKey(exclude)?.plain ?? null;
+}
+
+// 限流特征：codebuddy 把上游错误（429 / rate limit / quota）输出到 stderr
+function isRateLimited(err: unknown): boolean {
+  const e = err as Error & { stderr?: string };
+  const msg = `${e?.message ?? ''}\n${e?.stderr ?? ''}`;
+  return /429|rate.?limit|too many requests|quota/i.test(msg);
+}
+
+// 容器内 headless 调用 CodeBuddy；Key 与模型一样在 exec 时动态注入
+async function execCodeBuddy(containerName: string, prompt: string, apiKey: string): Promise<string> {
+  const { stdout, stderr } = await docker(
+    [
+      'exec',
+      // 覆盖容器创建时固化的模型与 Key，保证配置变更/轮询切换对已有容器立即生效
+      ...modelEnvArgs(),
+      // 堆上限压在 448m 容器限额以内：让 Node 先 GC/报 OOM，而不是整个容器被内核 kill
+      ...nodeOptsArgs(),
+      '-e', `CODEBUDDY_API_KEY=${apiKey}`,
+      containerName,
+      'codebuddy', '-p', prompt, '--output-format', 'text', '-y',
+    ],
+    config.workspace.execTimeoutMs,
+  );
+  const out = stdout.trim();
+  if (out) return out;
+  // codebuddy 把真实错误（额度/鉴权/模型不可用等）输出到 stderr 且 stdout 为空，
+  // 这里把真实错误抛给上层，避免向用户展示误导性的「AI 未返回内容」
+  const detail = stderr.trim();
+  if (detail) {
+    const e = new Error(detail) as Error & { isAiError?: boolean };
+    e.isAiError = true;
+    throw e;
+  }
+  return '（AI 未返回内容）';
 }
 
 // 教师控制：暂停某个学生的容器（容器保留，可随时开启）

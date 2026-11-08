@@ -10,7 +10,7 @@ import analyticsRoutes from './routes/analytics';
 import workspaceRoutes from './routes/workspaces';
 import adminRoutes from './routes/admin';
 import { registerChatHandlers } from './sockets/chat';
-import { getSharedStudentKey } from './services/sharedKeyService';
+import { initSharedKeyPool, pickSharedKey } from './services/sharedKeyService';
 
 const app = express();
 const server = http.createServer(app);
@@ -56,13 +56,14 @@ registerChatHandlers(io);
 
 // 云平台（Render 等）要求监听 0.0.0.0 和平台分配的 PORT
 async function bootstrap() {
-  // 从数据库（加密字段）解析统一共享 Key 并填入运行期配置，避免明文落盘
-  const sharedKey = await getSharedStudentKey();
-  if (sharedKey) {
-    config.workspace.apiKey = sharedKey;
-    console.log('[config] 已载入学生统一共享 Key（来自数据库加密字段）');
+  // 从数据库（SharedKey 表，加密字段）加载共享 Key 池，按轮询分配给学生的 AI 调用
+  const poolCount = await initSharedKeyPool();
+  // 兼容旧逻辑：注册自动绑定仍需要一个主共享 Key（取池内轮询到的第一个）
+  config.workspace.apiKey = pickSharedKey()?.plain ?? '';
+  if (poolCount > 0) {
+    console.log(`[config] 已载入学生共享 Key 池：${poolCount} 个 Key 轮询分配`);
   } else {
-    console.warn('[config] 未找到学生统一共享 Key：新注册学生将无法自动分配 AI Key，请用 set-shared-key 脚本写入');
+    console.warn('[config] 共享 Key 池为空：新注册学生将无法自动分配 AI Key，请用 addSharedKey 脚本写入');
   }
 
   server.listen(config.port, '0.0.0.0', () => {

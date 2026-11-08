@@ -121,6 +121,15 @@ model AiUsage {
   @@index([userId])
 }
 
+// 学生共享 AI Key 池：多个 Key 轮询分摊并发限流压力（AES-256-GCM 加密存储，明文不落盘）
+model SharedKey {
+  id          String   @id @default(cuid())
+  encrypted   String
+  fingerprint String   @unique
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
 // 学生 AI 工作台容器：每 (classroom, student) 一个 CodeBuddy 容器
 // status 取值：CREATED（已创建未运行）| RUNNING（运行中）| STOPPED（闲置停止，可唤醒）
 model Workspace {
