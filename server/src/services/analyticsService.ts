@@ -3,6 +3,7 @@ import {
   AnalyticsResult,
   GroupCompareItem,
   InteractionLink,
+  InteractionLogItem,
   InteractionNode,
   PersonalProfileItem,
   QuestionLogItem,
@@ -120,6 +121,19 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
     }))
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
+  // 小组互动记录（学生间聊天的原文），最新在前
+  const interactions: InteractionLogItem[] = peerMessages
+    .map((m) => ({
+      id: m.id,
+      senderId: m.senderId,
+      senderName: m.sender.name,
+      groupName: m.group.name,
+      documentTitle: m.document?.title ?? null,
+      content: m.content,
+      createdAt: m.createdAt,
+    }))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
   return {
     peerMessageCount: peerMessages.length,
     aiUsageCount: aiMessages.length,
@@ -131,6 +145,7 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
     timeline,
     network,
     questions,
+    interactions,
   };
 }
 

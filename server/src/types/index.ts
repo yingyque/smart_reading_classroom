@@ -99,6 +99,9 @@ export interface QuestionLogItem {
   createdAt: Date;
 }
 
+// 小组互动记录与提问记录结构相同（学生发出的消息原文）
+export type InteractionLogItem = QuestionLogItem;
+
 export interface AnalyticsResult {
   peerMessageCount: number;
   aiUsageCount: number;
@@ -113,4 +116,5 @@ export interface AnalyticsResult {
     links: InteractionLink[];
   };
   questions: QuestionLogItem[];
+  interactions: InteractionLogItem[];
 }
