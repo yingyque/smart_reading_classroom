@@ -54,9 +54,14 @@ export default function TeacherDashboard() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadClassrooms = async () => {
-    const res = await api.get('/classrooms/mine');
-    setClassrooms(res.data);
-    if (!active && res.data.length) selectClass(res.data[0]);
+    try {
+      const res = await api.get('/classrooms/mine');
+      setClassrooms(res.data);
+      if (!active && res.data.length) selectClass(res.data[0]);
+    } catch (err: any) {
+      console.error('课堂列表加载失败', err);
+      alert(err.response?.data?.error || '课堂列表加载失败，请重新登录后再试');
+    }
   };
 
   useEffect(() => {
@@ -112,11 +117,19 @@ export default function TeacherDashboard() {
   };
 
   const createClass = async () => {
-    if (!newName.trim()) return;
-    const res = await api.post('/classrooms', { name: newName.trim() });
-    setNewName('');
-    await loadClassrooms();
-    selectClass(res.data);
+    if (!newName.trim()) {
+      alert('请先填写课堂名称');
+      return;
+    }
+    try {
+      const res = await api.post('/classrooms', { name: newName.trim() });
+      setNewName('');
+      await loadClassrooms();
+      selectClass(res.data);
+    } catch (err: any) {
+      console.error('创建课堂失败', err);
+      alert(err.response?.data?.error || '创建课堂失败，请稍后重试');
+    }
   };
 
   const upload = async (file: File) => {

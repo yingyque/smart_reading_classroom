@@ -18,6 +18,17 @@ function Protected({ children }: { children: JSX.Element }) {
   return children;
 }
 
+function homePath(role?: string) {
+  return role === 'ADMIN' ? '/shimin' : role === 'TEACHER' ? '/teacher' : '/student';
+}
+
+// 角色守卫：非对应角色一律弹回各自首页，避免打开无权限页面后接口静默 403
+function RoleGuard({ role, children }: { role: string; children: JSX.Element }) {
+  const { user } = useAuth();
+  if (user && user.role !== role) return <Navigate to={homePath(user.role)} replace />;
+  return children;
+}
+
 export default function App() {
   const { user } = useAuth();
 
@@ -42,7 +53,9 @@ export default function App() {
         path="/teacher"
         element={
           <Protected>
-            <TeacherDashboard />
+            <RoleGuard role="TEACHER">
+              <TeacherDashboard />
+            </RoleGuard>
           </Protected>
         }
       />
@@ -50,7 +63,9 @@ export default function App() {
         path="/teacher/:classroomId/analytics"
         element={
           <Protected>
-            <Analytics />
+            <RoleGuard role="TEACHER">
+              <Analytics />
+            </RoleGuard>
           </Protected>
         }
       />
@@ -58,7 +73,9 @@ export default function App() {
         path="/shimin"
         element={
           <Protected>
-            <AdminDashboard />
+            <RoleGuard role="ADMIN">
+              <AdminDashboard />
+            </RoleGuard>
           </Protected>
         }
       />
@@ -66,7 +83,9 @@ export default function App() {
         path="/student"
         element={
           <Protected>
-            <StudentHome />
+            <RoleGuard role="STUDENT">
+              <StudentHome />
+            </RoleGuard>
           </Protected>
         }
       />
