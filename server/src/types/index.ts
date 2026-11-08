@@ -89,6 +89,16 @@ export interface InteractionLink {
   value: number;
 }
 
+export interface QuestionLogItem {
+  id: string;
+  senderId: string;
+  senderName: string;
+  groupName: string;
+  documentTitle: string | null;
+  content: string;
+  createdAt: Date;
+}
+
 export interface AnalyticsResult {
   peerMessageCount: number;
   aiUsageCount: number;
@@ -102,4 +112,5 @@ export interface AnalyticsResult {
     nodes: InteractionNode[];
     links: InteractionLink[];
   };
+  questions: QuestionLogItem[];
 }

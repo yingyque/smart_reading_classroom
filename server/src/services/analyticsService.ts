@@ -5,6 +5,7 @@ import {
   InteractionLink,
   InteractionNode,
   PersonalProfileItem,
+  QuestionLogItem,
   TimelineItem,
   WordCloudItem,
 } from '../types';
@@ -49,7 +50,7 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
   const [messages, groups] = await Promise.all([
     prisma.message.findMany({
       where: { classroomId },
-      include: { sender: true, group: true },
+      include: { sender: true, group: true, document: true },
       orderBy: { createdAt: 'asc' },
     }),
     prisma.group.findMany({
@@ -106,6 +107,19 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
 
   const network = buildNetwork(peerMessages, groups);
 
+  // 学生原始提问记录（向 AI 提问的原文），最新在前
+  const questions: QuestionLogItem[] = aiMessages
+    .map((m) => ({
+      id: m.id,
+      senderId: m.senderId,
+      senderName: m.sender.name,
+      groupName: m.group.name,
+      documentTitle: m.document?.title ?? null,
+      content: m.content,
+      createdAt: m.createdAt,
+    }))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
   return {
     peerMessageCount: peerMessages.length,
     aiUsageCount: aiMessages.length,
@@ -116,6 +130,7 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
     personalProfiles: personalProfiles.sort((a, b) => b.peer + b.ai - (a.peer + a.ai)),
     timeline,
     network,
+    questions,
   };
 }
 

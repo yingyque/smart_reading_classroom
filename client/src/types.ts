@@ -83,6 +83,16 @@ export interface TimelineItem {
   ai: number;
 }
 
+export interface QuestionLogItem {
+  id: string;
+  senderId: string;
+  senderName: string;
+  groupName: string;
+  documentTitle: string | null;
+  content: string;
+  createdAt: string;
+}
+
 export interface AnalyticsResult {
   peerMessageCount: number;
   aiUsageCount: number;
@@ -96,4 +106,5 @@ export interface AnalyticsResult {
     nodes: { id: string; name: string; group: string; value: number }[];
     links: { source: string; target: string; value: number }[];
   };
+  questions: QuestionLogItem[];
 }

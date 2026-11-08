@@ -13,6 +13,7 @@ import {
   Share2,
   BarChart3,
   Trophy,
+  MessageCircleQuestion,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
@@ -133,6 +134,56 @@ export default function Analytics() {
           <ChartCard title="小组活跃度对比" icon={<BarChart3 size={16} />} className="lg:col-span-2">
             <div className="h-72">
               <GroupCompare data={data?.groupCompare ?? []} />
+            </div>
+          </ChartCard>
+
+          {/* 学生提问记录 */}
+          <ChartCard
+            title={`学生提问记录（${data?.questions.length ?? 0} 条）`}
+            icon={<MessageCircleQuestion size={16} />}
+            className="lg:col-span-2"
+          >
+            <div className="max-h-96 overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white text-left text-xs text-ink-500">
+                  <tr className="border-b border-ink-900/5">
+                    <th className="px-3 py-2 font-medium">时间</th>
+                    <th className="px-3 py-2 font-medium">学生</th>
+                    <th className="px-3 py-2 font-medium">小组</th>
+                    <th className="px-3 py-2 font-medium">文献</th>
+                    <th className="px-3 py-2 font-medium">提问内容</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data?.questions ?? []).map((q) => (
+                    <tr key={q.id} className="border-b border-ink-900/5 last:border-0 hover:bg-ink-900/[0.02]">
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-ink-500">
+                        {new Date(q.createdAt).toLocaleString('zh-CN', {
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 font-medium text-ink-900">{q.senderName}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-ink-500">{q.groupName}</td>
+                      <td className="max-w-40 truncate px-3 py-2 text-ink-500" title={q.documentTitle ?? ''}>
+                        {q.documentTitle ?? '—'}
+                      </td>
+                      <td className="px-3 py-2 text-ink-900">
+                        <span className="line-clamp-3 whitespace-pre-wrap break-all">{q.content}</span>
+                      </td>
+                    </tr>
+                  ))}
+                  {!(data?.questions ?? []).length && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-8 text-center text-ink-500">
+                        暂无学生提问记录
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </ChartCard>
 
