@@ -11,13 +11,19 @@ import {
   WordCloudItem,
 } from '../types';
 
-// nodejieba 为可选依赖：若原生模块安装失败，退化为简单分词，保证平台可运行
-let jieba: { cut: (text: string) => string[] } | null = null;
+// 中文分词：@node-rs/jieba（napi-rs 预编译二进制，兼容容器 GLIBC 2.36）。
+// 原用 nodejieba 的预编译产物要求 GLIBC_2.38，在 Debian 12 容器内调用时才抛错，
+// 降级为按标点切分后中文整句会进词云。若该模块加载/调用失败，仍退化为简易分词保证可运行。
+let jiebaCut: ((text: string) => string[]) | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  jieba = require('nodejieba');
+  const { Jieba } = require('@node-rs/jieba');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { dict } = require('@node-rs/jieba/dict');
+  const jieba = Jieba.withDict(dict);
+  jiebaCut = (text: string) => jieba.cut(text, false);
 } catch (err) {
-  console.warn('[analytics] nodejieba 不可用，词云将使用简易分词:', (err as Error).message);
+  console.warn('[analytics] @node-rs/jieba 不可用，词云将使用简易分词:', (err as Error).message);
 }
 
 // 中英文停用词（精简常用集）
@@ -34,14 +40,14 @@ function tokenize(text: string): string[] {
 }
 
 function tokenizeRaw(text: string): string[] {
-  // nodejieba 的原生模块可能在调用时才暴露运行环境不兼容（如 GLIBC 版本过低），
+  // 原生模块可能在调用时才暴露运行环境不兼容（如 GLIBC 版本过低），
   // 此时永久降级为简易分词，避免 buildAnalytics 整体失败
-  if (jieba) {
+  if (jiebaCut) {
     try {
-      return jieba.cut(text);
+      return jiebaCut(text);
     } catch (err) {
-      console.warn('[analytics] nodejieba 不可用，已切换为简易分词:', (err as Error).message);
-      jieba = null;
+      console.warn('[analytics] @node-rs/jieba 调用失败，已切换为简易分词:', (err as Error).message);
+      jiebaCut = null;
     }
   }
   return text.split(/[\s，。！？、；：,.!?;:()\[\]{}"'\n\r]+/);

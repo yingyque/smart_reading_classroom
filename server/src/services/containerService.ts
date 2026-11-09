@@ -296,7 +296,8 @@ async function execCodeBuddy(
       '-e', `CODEBUDDY_API_KEY=${apiKey}`,
       containerName,
       'sh', '-c',
-      'cat > /tmp/cb-p.txt && codebuddy -p --output-format json -y < /tmp/cb-p.txt > /tmp/cb-out.json 2>/tmp/cb-err; ec=$?; cat /tmp/cb-out.json; if [ -s /tmp/cb-err ]; then cat /tmp/cb-err >&2; fi; exit $ec',
+      // --disallowedTools 硬性禁用生图/生视频工具（防 AI 输出图片占位导致前端灰框）
+      'cat > /tmp/cb-p.txt && codebuddy -p --output-format json --disallowedTools ImageGen,VideoGen -y < /tmp/cb-p.txt > /tmp/cb-out.json 2>/tmp/cb-err; ec=$?; cat /tmp/cb-out.json; if [ -s /tmp/cb-err ]; then cat /tmp/cb-err >&2; fi; exit $ec',
     ],
     config.workspace.execTimeoutMs,
     prompt,

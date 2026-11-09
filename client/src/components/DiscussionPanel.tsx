@@ -208,9 +208,9 @@ const mdComponents: Components = {
   ul: ({ children }) => <ul className="mb-2 list-disc pl-4">{children}</ul>,
   ol: ({ children }) => <ol className="mb-2 list-decimal pl-4">{children}</ol>,
   li: ({ children }) => <li className="mb-0.5">{children}</li>,
-  // 代码块：pre 深色底；[&_code] 重置块内 code 的行内样式
+  // 代码块：白底浅边框（原深灰底会被学生误认为"图片加载失败"的灰框）
   pre: ({ children }) => (
-    <pre className="mb-2 overflow-x-auto rounded-lg bg-ink-900 p-2.5 text-xs [&_code]:bg-transparent [&_code]:px-0 [&_code]:py-0 [&_code]:text-[inherit] [&_code]:text-ink-50">
+    <pre className="mb-2 overflow-x-auto rounded-lg border border-ink-900/10 bg-white p-2.5 text-xs [&_code]:bg-transparent [&_code]:px-0 [&_code]:py-0 [&_code]:text-[inherit] [&_code]:text-ink-900">
       {children}
     </pre>
   ),
