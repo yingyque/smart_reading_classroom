@@ -316,7 +316,14 @@ async function execCodeBuddy(
     }
     if (text) return { text, usage };
   } else if (out) {
-    // 兜底：非 JSON 输出按纯文本回复处理（旧版本 codebuddy）
+    // 兜底：非 JSON 输出按纯文本回复处理（旧版本 codebuddy）。
+    // 但 JSON 形态却解析失败（典型：输出超长被截断）时，原始输出里是完整的
+    // 用户消息结构（含 system-reminder、文献全文），绝不能原样吐给学生
+    if (/^\s*[[{]/.test(out)) {
+      const e = new Error('AI 返回数据异常（输出不完整），请重新提问试试') as Error & { isAiError?: boolean };
+      e.isAiError = true;
+      throw e;
+    }
     return { text: out, usage: null };
   }
 
