@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { authRequired, roleRequired, AuthedRequest } from '../middleware/auth';
 import { buildAnalytics } from '../services/analyticsService';
@@ -60,6 +61,42 @@ async function studentIdsOfClassroom(classroomId: string): Promise<string[]> {
     prisma.workspace.findMany({ where: { classroomId }, select: { userId: true } }),
   ]);
   return Array.from(new Set([...members, ...workspaces].map((m) => m.userId)));
+}
+
+export interface StudentAiUsage {
+  questions: number;
+  inputTokens: number;
+  outputTokens: number;
+  // 历史记录（未记录真实 token 时）按字符估算的部分，≈ (promptChars+replyChars)/3
+  estimatedTokens: number;
+}
+
+const EMPTY_USAGE: StudentAiUsage = { questions: 0, inputTokens: 0, outputTokens: 0, estimatedTokens: 0 };
+
+// 每学生 AI token 消耗汇总：真实 token（新记录）+ 历史记录按字符估算（inputTokens=0 的行）
+async function aiUsageByUser(userIds?: string[]): Promise<Map<string, StudentAiUsage>> {
+  const rows = await prisma.$queryRaw<
+    Array<{ userid: string; questions: bigint; intok: bigint; outtok: bigint; esttok: bigint }>
+  >`
+    SELECT "userId",
+      COUNT(*) AS questions,
+      COALESCE(SUM("inputTokens"), 0) AS intok,
+      COALESCE(SUM("outputTokens"), 0) AS outtok,
+      COALESCE(SUM(CASE WHEN "inputTokens" = 0 THEN CEIL(("promptChars" + "replyChars") / 3.0) ELSE 0 END), 0) AS esttok
+    FROM "AiUsage"
+    ${userIds ? Prisma.sql`WHERE "userId" IN (${Prisma.join(userIds)})` : Prisma.empty}
+    GROUP BY "userId"
+  `;
+  const map = new Map<string, StudentAiUsage>();
+  for (const r of rows) {
+    map.set(r.userid, {
+      questions: Number(r.questions),
+      inputTokens: Number(r.intok),
+      outputTokens: Number(r.outtok),
+      estimatedTokens: Number(r.esttok),
+    });
+  }
+  return map;
 }
 
 // 统计失败不应挡住详情展示
@@ -143,9 +180,9 @@ router.get('/teachers', async (_req: AuthedRequest, res: Response) => {
   );
 });
 
-// 全部学生（含加入课堂数与容器状态）
+// 全部学生（含加入课堂数、容器状态与 AI token 消耗）
 router.get('/students', async (_req: AuthedRequest, res: Response) => {
-  const [students, memberships, workspaces] = await Promise.all([
+  const [students, memberships, workspaces, usage] = await Promise.all([
     prisma.user.findMany({
       where: { role: 'STUDENT' },
       orderBy: { createdAt: 'desc' },
@@ -155,6 +192,7 @@ router.get('/students', async (_req: AuthedRequest, res: Response) => {
       select: { userId: true, group: { select: { classroomId: true } } },
     }),
     prisma.workspace.findMany({ select: { userId: true, classroomId: true, status: true } }),
+    aiUsageByUser(),
   ]);
 
   const classroomsByUser = new Map<string, Set<string>>();
@@ -186,6 +224,7 @@ router.get('/students', async (_req: AuthedRequest, res: Response) => {
       keyActivated: Boolean(s.aiKey),
       classroomCount: classroomsByUser.get(s.id)?.size ?? 0,
       containers: containersByUser.get(s.id) ?? { total: 0, running: 0, paused: 0 },
+      aiUsage: usage.get(s.id) ?? { ...EMPTY_USAGE },
     })),
   );
 });
@@ -363,7 +402,7 @@ router.get('/students/:id', async (req: AuthedRequest, res: Response) => {
     return res.status(404).json({ error: '学生不存在' });
   }
 
-  const [memberships, workspaces, aiQuestions, peerMessages] = await Promise.all([
+  const [memberships, workspaces, aiQuestions, peerMessages, usageMap] = await Promise.all([
     prisma.groupMember.findMany({
       where: { userId: student.id },
       include: {
@@ -380,6 +419,7 @@ router.get('/students/:id', async (req: AuthedRequest, res: Response) => {
     }),
     prisma.message.count({ where: { senderId: student.id, type: 'AI', isAiReply: false } }),
     prisma.message.count({ where: { senderId: student.id, type: 'PEER', isAiReply: false } }),
+    aiUsageByUser([student.id]),
   ]);
 
   type Entry = {
@@ -443,6 +483,7 @@ router.get('/students/:id', async (req: AuthedRequest, res: Response) => {
     lastActiveAt,
     aiQuestions,
     peerMessages,
+    aiUsage: usageMap.get(student.id) ?? { ...EMPTY_USAGE },
   });
 });
 

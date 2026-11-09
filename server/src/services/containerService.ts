@@ -23,9 +23,15 @@ export class WorkspacePausedError extends Error {
   }
 }
 
-function docker(args: string[], timeoutMs = 30000): Promise<{ stdout: string; stderr: string }> {
+function docker(
+  args: string[],
+  timeoutMs = 30000,
+  // 可选 stdin 输入：用于 docker exec -i 把超长内容（如 prompt）管道传给容器内进程，
+  // 绕开 argv 单参数 128KB（MAX_ARG_STRLEN）上限
+  input?: string,
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile('docker', args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile('docker', args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         (err as Error & { stderr?: string }).stderr = stderr;
         reject(err);
@@ -33,6 +39,11 @@ function docker(args: string[], timeoutMs = 30000): Promise<{ stdout: string; st
         resolve({ stdout, stderr });
       }
     });
+    if (input !== undefined && child.stdin) {
+      // 进程提前退出时 stdin.write 可能 EPIPE，忽略即可（退出码由回调捕获）
+      child.stdin.on('error', () => undefined);
+      child.stdin.end(input);
+    }
   });
 }
 
@@ -181,7 +192,7 @@ export async function runCodeBuddy(
   userId: string,
   prompt: string,
   onQueuePosition?: (pos: number) => void,
-): Promise<string> {
+): Promise<{ text: string; usage: CbUsage | null }> {
   const ws = await ensureWorkspace(classroomId, userId);
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user?.aiKey && poolSize() === 0) {
@@ -255,23 +266,60 @@ function isRateLimited(err: unknown): boolean {
   return /429|rate.?limit|too many requests|quota/i.test(msg);
 }
 
+// codebuddy --output-format json 返回的 token 用量
+export interface CbUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 // 容器内 headless 调用 CodeBuddy；Key 与模型一样在 exec 时动态注入
-async function execCodeBuddy(containerName: string, prompt: string, apiKey: string): Promise<string> {
+// --output-format json：末尾 result 项带真实 token 用量（usage.input_tokens / output_tokens）
+async function execCodeBuddy(
+  containerName: string,
+  prompt: string,
+  apiKey: string,
+): Promise<{ text: string; usage: CbUsage | null }> {
+  // prompt 与输出均经容器内临时文件中转（学生容器单用户使用、全局队列串行，文件名固定无并发冲突）：
+  // ① prompt 作为 argv 传递受内核单参数 128KB（MAX_ARG_STRLEN）上限，超长文献（5 万中文字符
+  //   ≈ 150KB UTF-8）会直接 spawn E2BIG，学生端表现为「容器启动或调用超时」，故改走
+  //   docker exec -i 的 stdin 先 cat 落盘；
+  // ② codebuddy 向管道写超过 64KB 的输出时会在退出时截断（不等 flush，数据滞留管道缓冲区外丢失），
+  //   故输出同样先落盘、再由 cat 正常回传（cat 无此问题）。
   const { stdout, stderr } = await docker(
     [
       'exec',
+      '-i',
       // 覆盖容器创建时固化的模型与 Key，保证配置变更/轮询切换对已有容器立即生效
       ...modelEnvArgs(),
       // 堆上限压在 448m 容器限额以内：让 Node 先 GC/报 OOM，而不是整个容器被内核 kill
       ...nodeOptsArgs(),
       '-e', `CODEBUDDY_API_KEY=${apiKey}`,
       containerName,
-      'codebuddy', '-p', prompt, '--output-format', 'text', '-y',
+      'sh', '-c',
+      'cat > /tmp/cb-p.txt && codebuddy -p --output-format json -y < /tmp/cb-p.txt > /tmp/cb-out.json 2>/tmp/cb-err; ec=$?; cat /tmp/cb-out.json; if [ -s /tmp/cb-err ]; then cat /tmp/cb-err >&2; fi; exit $ec',
     ],
     config.workspace.execTimeoutMs,
+    prompt,
   );
   const out = stdout.trim();
-  if (out) return out;
+
+  // JSON 输出：数组，含 user/assistant message 与末尾的 result（真实 token 用量）
+  const parsed = parseCodeBuddyJson(out);
+  if (parsed) {
+    const { text, usage, isError, errorText } = parsed;
+    if (isError && !text) {
+      // codebuddy 把真实错误（额度/鉴权/模型不可用等）放在 result 里，透传给上层
+      const detail = errorText || stderr.trim();
+      const e = new Error(detail || 'AI 调用失败') as Error & { isAiError?: boolean };
+      e.isAiError = true;
+      throw e;
+    }
+    if (text) return { text, usage };
+  } else if (out) {
+    // 兜底：非 JSON 输出按纯文本回复处理（旧版本 codebuddy）
+    return { text: out, usage: null };
+  }
+
   // codebuddy 把真实错误（额度/鉴权/模型不可用等）输出到 stderr 且 stdout 为空，
   // 这里把真实错误抛给上层，避免向用户展示误导性的「AI 未返回内容」
   const detail = stderr.trim();
@@ -280,7 +328,43 @@ async function execCodeBuddy(containerName: string, prompt: string, apiKey: stri
     e.isAiError = true;
     throw e;
   }
-  return '（AI 未返回内容）';
+  return { text: '（AI 未返回内容）', usage: null };
+}
+
+// 解析 codebuddy 的 JSON 输出；非 JSON（空/纯文本）返回 null
+function parseCodeBuddyJson(out: string): {
+  text: string;
+  usage: CbUsage | null;
+  isError: boolean;
+  errorText: string;
+} | null {
+  if (!out) return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(out);
+  } catch {
+    return null;
+  }
+  const items = (Array.isArray(data) ? data : [data]) as Array<Record<string, unknown>>;
+  const result = items.find((i) => i?.type === 'result') as
+    | { is_error?: boolean; result?: unknown; usage?: { input_tokens?: number; output_tokens?: number } }
+    | undefined;
+  const assistant = items.find((i) => i?.type === 'message' && i?.role === 'assistant') as
+    | { content?: Array<{ type?: string; text?: string }> }
+    | undefined;
+  const text = (assistant?.content ?? [])
+    .filter((c) => c.type === 'output_text' && typeof c.text === 'string')
+    .map((c) => c.text as string)
+    .join('')
+    .trim();
+  const usage = result?.usage
+    ? {
+        inputTokens: result.usage.input_tokens ?? 0,
+        outputTokens: result.usage.output_tokens ?? 0,
+      }
+    : null;
+  const errorText = typeof result?.result === 'string' ? result.result : '';
+  return { text, usage, isError: result?.is_error === true, errorText };
 }
 
 // 教师控制：暂停某个学生的容器（容器保留，可随时开启）

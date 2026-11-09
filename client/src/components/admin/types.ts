@@ -31,6 +31,14 @@ export interface TeacherRow {
   containers: ContainerStats;
 }
 
+// 每学生 AI token 消耗（与 server admin.ts 的 StudentAiUsage 对应）
+export interface StudentAiUsage {
+  questions: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedTokens: number;
+}
+
 export interface StudentRow {
   id: string;
   name: string;
@@ -39,6 +47,7 @@ export interface StudentRow {
   keyActivated: boolean;
   classroomCount: number;
   containers: SimpleContainerStats;
+  aiUsage: StudentAiUsage;
 }
 
 export interface ClassroomRow {
@@ -122,6 +131,7 @@ export interface StudentDetailData {
   lastActiveAt: string | null;
   aiQuestions: number;
   peerMessages: number;
+  aiUsage: StudentAiUsage;
 }
 
 export type DetailData = TeacherDetailData | ClassroomDetailData | StudentDetailData;

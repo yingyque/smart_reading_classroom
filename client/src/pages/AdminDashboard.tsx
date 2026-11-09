@@ -371,6 +371,7 @@ export default function AdminDashboard() {
                           <Th center>加入课堂</Th>
                           <Th center>容器 总/运行/暂停</Th>
                           <Th center>AI Key</Th>
+                          <Th center>AI Tokens</Th>
                           <Th>注册时间</Th>
                           <Th />
                         </tr>
@@ -393,6 +394,25 @@ export default function AdminDashboard() {
                             <Td center>
                               <span className={s.keyActivated ? 'text-emerald-600' : 'text-ink-500'}>
                                 {s.keyActivated ? '已激活' : '未激活'}
+                              </span>
+                            </Td>
+                            <Td center>
+                              <span
+                                className="font-mono text-xs"
+                                title={`提问 ${s.aiUsage.questions} 次 · 输入 ${fmtTokens(
+                                  s.aiUsage.inputTokens,
+                                )} · 输出 ${fmtTokens(s.aiUsage.outputTokens)}${
+                                  s.aiUsage.estimatedTokens
+                                    ? ` · 含按字符估算 ${fmtTokens(s.aiUsage.estimatedTokens)}（历史记录）`
+                                    : ''
+                                }`}
+                              >
+                                {s.aiUsage.estimatedTokens > 0 ? '≈' : ''}
+                                {fmtTokens(
+                                  s.aiUsage.inputTokens +
+                                    s.aiUsage.outputTokens +
+                                    s.aiUsage.estimatedTokens,
+                                )}
                               </span>
                             </Td>
                             <Td>
@@ -481,4 +501,9 @@ export default function AdminDashboard() {
 
 function errorOf(err: unknown, fallback: string): string {
   return (err as { response?: { data?: { error?: string } } })?.response?.data?.error || fallback;
+}
+
+// token 数展示：万级以上缩写为 12.3k
+function fmtTokens(n: number): string {
+  return n >= 10000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }

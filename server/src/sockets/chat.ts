@@ -181,9 +181,10 @@ export function registerChatHandlers(io: Server): void {
       const prompt = promptParts.join('\n');
 
       let replyContent: string;
+      let replyUsage: { inputTokens: number; outputTokens: number } | null = null;
       pendingAiUsers.add(user.id);
       try {
-        replyContent = await runCodeBuddy(group.classroomId, user.id, prompt, (pos) => {
+        const cbResult = await runCodeBuddy(group.classroomId, user.id, prompt, (pos) => {
           if (pos > 0) {
             // 排队中：告知位次（只发给提问的学生本人）
             io.to(userRoomOf(user.id)).emit('ai:queued', { groupId: group.id, position: pos });
@@ -192,6 +193,8 @@ export function registerChatHandlers(io: Server): void {
             io.to(userRoomOf(user.id)).emit('ai:typing', { groupId: group.id });
           }
         });
+        replyContent = cbResult.text;
+        replyUsage = cbResult.usage;
       } catch (err) {
         if (err instanceof WorkspacePausedError) {
           replyContent = '你的 AI 工作台已被教师暂停，暂时无法讨论。请联系教师重新开启。';
@@ -229,6 +232,8 @@ export function registerChatHandlers(io: Server): void {
           documentId: payload.documentId,
           promptChars: prompt.length,
           replyChars: replyContent.length,
+          inputTokens: replyUsage?.inputTokens ?? 0,
+          outputTokens: replyUsage?.outputTokens ?? 0,
         },
       });
       const aiOut = toChatMessage(aiMsg, 'AI 助手');

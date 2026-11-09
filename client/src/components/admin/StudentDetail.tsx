@@ -45,7 +45,7 @@ export function StudentDetail({
             }
           />
         </div>
-        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-6">
           <MiniStat label="加入课堂" value={data.classrooms.length} color="text-violet-600" bg="bg-violet-500/5" />
           <MiniStat
             label="运行中的容器"
@@ -55,7 +55,19 @@ export function StudentDetail({
           />
           <MiniStat label="AI 提问" value={data.aiQuestions} color="text-brand-600" bg="bg-brand-500/5" />
           <MiniStat label="组内发言" value={data.peerMessages} color="text-teal-600" bg="bg-teal-500/5" />
+          <MiniStat
+            label="输入 Tokens"
+            value={`${data.aiUsage.estimatedTokens > 0 ? '≈' : ''}${data.aiUsage.inputTokens + data.aiUsage.estimatedTokens}`}
+            color="text-amber-600"
+            bg="bg-amber-500/5"
+          />
+          <MiniStat label="输出 Tokens" value={data.aiUsage.outputTokens} color="text-rose-600" bg="bg-rose-500/5" />
         </div>
+        {data.aiUsage.estimatedTokens > 0 && (
+          <p className="mt-2 text-xs text-ink-500">
+            ≈ 表示含按字符估算的历史用量（更早的记录未记录真实 token）；此后新记录为接口返回的真实用量。
+          </p>
+        )}
       </SectionCard>
 
       <SectionCard
