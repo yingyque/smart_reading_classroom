@@ -21,6 +21,8 @@ interface SocketUser extends JwtPayload {
 
 const roomOf = (groupId: string) => `group:${groupId}`;
 const teacherRoomOf = (classroomId: string) => `teacher:${classroomId}`;
+// 用户私有房间：AI 对话（学生↔AI 私聊）只发到这里与教师房间，不进小组房间
+const userRoomOf = (userId: string) => `user:${userId}`;
 
 // 有待处理 AI 请求（排队中或执行中）的学生：防止一个学生连发多条把全局队列占满
 const pendingAiUsers = new Set<string>();
@@ -45,6 +47,8 @@ export function registerChatHandlers(io: Server): void {
 
   io.on('connection', (socket: Socket) => {
     const user = (socket.data as { user: SocketUser }).user;
+    // 同一账号多端/多标签页都能收到自己的 AI 私聊
+    socket.join(userRoomOf(user.id));
 
     // 加入小组房间（学生）
     socket.on('group:join', async (payload: JoinGroupPayload) => {
@@ -104,10 +108,10 @@ export function registerChatHandlers(io: Server): void {
         },
       });
       const userOut = toChatMessage(userMsg, user.name);
-      io.to(roomOf(group.id)).emit('message:new', userOut);
+      io.to(userRoomOf(user.id)).emit('message:new', userOut);
       io.to(teacherRoomOf(group.classroomId)).emit('message:new', userOut);
 
-      // 2) 组装文献上下文与最近 AI 对话
+      // 2) 组装文献上下文与最近 AI 对话（仅本人对话，AI 私聊不进他人上下文）
       let docTitle: string | undefined;
       let docContent: string | undefined;
       if (payload.documentId) {
@@ -118,7 +122,7 @@ export function registerChatHandlers(io: Server): void {
         }
       }
       const recent = await prisma.message.findMany({
-        where: { groupId: group.id, type: 'AI' },
+        where: { groupId: group.id, type: 'AI', senderId: user.id },
         orderBy: { createdAt: 'desc' },
         take: 10,
       });
@@ -142,7 +146,7 @@ export function registerChatHandlers(io: Server): void {
           },
         });
         const hintOut = toChatMessage(hint, 'AI 助手');
-        io.to(roomOf(group.id)).emit('message:new', hintOut);
+        io.to(userRoomOf(user.id)).emit('message:new', hintOut);
         io.to(teacherRoomOf(group.classroomId)).emit('message:new', hintOut);
         return;
       }
@@ -161,13 +165,13 @@ export function registerChatHandlers(io: Server): void {
           },
         });
         const busyOut = toChatMessage(busyHint, 'AI 助手');
-        io.to(roomOf(group.id)).emit('message:new', busyOut);
+        io.to(userRoomOf(user.id)).emit('message:new', busyOut);
         io.to(teacherRoomOf(group.classroomId)).emit('message:new', busyOut);
         return;
       }
 
       // 5) 组装 prompt 并路由到该学生的专属容器（CodeBuddy headless）
-      socket.emit('ai:typing', { groupId: group.id });
+      io.to(userRoomOf(user.id)).emit('ai:typing', { groupId: group.id });
       const docSnippet = (docContent ?? '').slice(0, config.ai.contextCharLimit);
       const promptParts: string[] = [buildSystemPrompt(docTitle, docSnippet)];
       for (const m of recentMessages) {
@@ -182,10 +186,10 @@ export function registerChatHandlers(io: Server): void {
         replyContent = await runCodeBuddy(group.classroomId, user.id, prompt, (pos) => {
           if (pos > 0) {
             // 排队中：告知位次（只发给提问的学生本人）
-            socket.emit('ai:queued', { groupId: group.id, position: pos });
+            io.to(userRoomOf(user.id)).emit('ai:queued', { groupId: group.id, position: pos });
           } else {
             // 获得执行权：从「排队中」切回「思考中」
-            socket.emit('ai:typing', { groupId: group.id });
+            io.to(userRoomOf(user.id)).emit('ai:typing', { groupId: group.id });
           }
         });
       } catch (err) {
@@ -228,7 +232,7 @@ export function registerChatHandlers(io: Server): void {
         },
       });
       const aiOut = toChatMessage(aiMsg, 'AI 助手');
-      io.to(roomOf(group.id)).emit('message:new', aiOut);
+      io.to(userRoomOf(user.id)).emit('message:new', aiOut);
       io.to(teacherRoomOf(group.classroomId)).emit('message:new', aiOut);
     });
   });

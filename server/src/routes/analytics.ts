@@ -21,10 +21,15 @@ router.get('/:classroomId', authRequired, async (req: AuthedRequest, res: Respon
   return res.json(data);
 });
 
-// 某小组历史消息（含 AI），支持回看
+// 某小组历史消息，支持回看。
+// 隐私规则：PEER 小组讨论组内共享；AI 对话属于学生与 AI 的私聊，仅提问者本人可见（教师经 Socket 实时监听）
 router.get('/:classroomId/messages/:groupId', authRequired, async (req: AuthedRequest, res: Response) => {
   const messages = await prisma.message.findMany({
-    where: { classroomId: req.params.classroomId, groupId: req.params.groupId },
+    where: {
+      classroomId: req.params.classroomId,
+      groupId: req.params.groupId,
+      OR: [{ type: 'PEER' }, { type: 'AI', senderId: req.user!.id }],
+    },
     include: { sender: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'asc' },
   });
