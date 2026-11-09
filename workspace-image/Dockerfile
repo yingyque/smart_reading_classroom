@@ -5,8 +5,9 @@ FROM node:20-slim
 # 注：构建容器内 80 端口不通且镜像无 CA 证书，注入宿主机 CA 包
 COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
-# 全局安装 CodeBuddy CLI
+# 全局安装 CodeBuddy CLI（走腾讯云 npm 镜像，国内服务器直连 npmjs.org 极慢）
 RUN npm config set cafile /etc/ssl/certs/ca-certificates.crt \
+ && npm config set registry https://mirrors.cloud.tencent.com/npm/ \
  && npm install -g @tencent-ai/codebuddy-code \
  && npm cache clean --force
 

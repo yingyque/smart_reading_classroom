@@ -3,7 +3,8 @@ FROM node:20-slim AS build
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+# .npmrc 指向腾讯云 npm 镜像（国内服务器直连 registry.npmjs.org 极慢）
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci
 
 COPY . .
