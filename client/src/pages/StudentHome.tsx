@@ -1,35 +1,38 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpenText, LogOut, Users, ArrowRight, Loader2, Hash } from 'lucide-react';
+import { BookOpenText, LogOut, ArrowRight, Loader2, Hash } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { Group } from '../types';
 
 interface JoinedClass {
-  classroom: { id: string; name: string };
-  group: Group | null;
-  message?: string;
+  id: string;
+  name: string;
+  groupName: string | null;
 }
 
 export default function StudentHome() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [code, setCode] = useState('');
-  const [joined, setJoined] = useState<JoinedClass | null>(null);
+  const [classrooms, setClassrooms] = useState<JoinedClass[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
 
-  // 读取上次加入的课堂
-  useEffect(() => {
-    const saved = localStorage.getItem('student:lastClass');
-    if (saved) {
-      try {
-        setJoined(JSON.parse(saved));
-      } catch {
-        // 旧数据结构损坏时清除，避免渲染崩溃
-        localStorage.removeItem('student:lastClass');
-      }
+  // 从服务端拉取当前账号已加入的课堂（不依赖 localStorage，换账号不会串课堂）
+  const loadClassrooms = async () => {
+    try {
+      const res = await api.get('/classrooms/joined');
+      setClassrooms(res.data);
+    } catch (err) {
+      console.error('课堂列表加载失败', err);
+    } finally {
+      setFetching(false);
     }
+  };
+
+  useEffect(() => {
+    loadClassrooms();
   }, []);
 
   const join = async () => {
@@ -37,9 +40,9 @@ export default function StudentHome() {
     if (!code.trim()) return;
     setLoading(true);
     try {
-      const res = await api.post('/classrooms/join', { code: code.trim() });
-      setJoined(res.data);
-      localStorage.setItem('student:lastClass', JSON.stringify(res.data));
+      await api.post('/classrooms/join', { code: code.trim() });
+      setCode('');
+      await loadClassrooms();
     } catch (err: any) {
       console.error('加入失败', err);
       setError(err.response?.data?.error || '加入失败');
@@ -48,15 +51,13 @@ export default function StudentHome() {
     }
   };
 
-  const refreshGroup = async () => {
-    if (!joined) return;
+  const refreshGroup = async (classroomId: string) => {
     try {
-      const res = await api.get(`/classrooms/${joined.classroom.id}/my-group`);
-      const next = { ...joined, group: res.data };
-      setJoined(next);
-      localStorage.setItem('student:lastClass', JSON.stringify(next));
+      await api.get(`/classrooms/${classroomId}/my-group`);
+      await loadClassrooms();
     } catch (err) {
       console.error('暂未分组', err);
+      setError('尚未分组，请等待教师分组');
     }
   };
 
@@ -93,52 +94,53 @@ export default function StudentHome() {
           {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
         </div>
 
-        {/* 已加入信息 */}
-        {joined && (
-          <div className="mt-6 animate-fade-in-up rounded-2xl border border-white/60 bg-white p-6 shadow-soft">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm text-ink-500">当前课堂</p>
-                <h2 className="text-xl font-bold text-ink-900">{joined.classroom.name}</h2>
+        {/* 我的课堂列表（仅显示本账号已加入的课堂） */}
+        {fetching ? (
+          <div className="mt-6 flex justify-center py-6 text-ink-500">
+            <Loader2 size={20} className="animate-spin" />
+          </div>
+        ) : (
+          classrooms.map((c) => (
+            <div
+              key={c.id}
+              className="mt-6 animate-fade-in-up rounded-2xl border border-white/60 bg-white p-6 shadow-soft"
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-ink-500">我的课堂</p>
+                  <h2 className="text-xl font-bold text-ink-900">{c.name}</h2>
+                </div>
+                {c.groupName ? (
+                  <span className="rounded-full bg-teal-500/10 px-3 py-1 text-sm font-medium text-teal-500">
+                    {c.groupName}
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => refreshGroup(c.id)}
+                    className="rounded-full bg-amber-500/10 px-3 py-1 text-sm font-medium text-amber-600 hover:bg-amber-500/20"
+                  >
+                    等待分组 · 点击刷新
+                  </button>
+                )}
               </div>
-              {joined.group ? (
-                <span className="rounded-full bg-teal-500/10 px-3 py-1 text-sm font-medium text-teal-500">
-                  {joined.group.name}
-                </span>
-              ) : (
-                <button
-                  onClick={refreshGroup}
-                  className="rounded-full bg-amber-500/10 px-3 py-1 text-sm font-medium text-amber-600 hover:bg-amber-500/20"
-                >
-                  等待分组 · 点击刷新
-                </button>
-              )}
-            </div>
 
-            {joined.group && (
-              <>
-                <div className="mt-4 flex items-center gap-2 text-sm text-ink-500">
-                  <Users size={16} /> 小组成员（{joined.group.members?.length ?? 0} 人）
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {(joined.group.members ?? []).map((m) => (
-                    <span
-                      key={m.userId}
-                      className="rounded-lg bg-ink-900/5 px-3 py-1 text-sm text-ink-900"
-                    >
-                      {m.user.name}
-                    </span>
-                  ))}
-                </div>
+              {c.groupName ? (
                 <button
-                  onClick={() => navigate(`/reading/${joined.classroom.id}`)}
+                  onClick={() => navigate(`/reading/${c.id}`)}
                   className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-violet-500 py-3 font-semibold text-white shadow-glass transition-all hover:shadow-lg active:scale-[0.98]"
                 >
                   <BookOpenText size={18} /> 进入阅读讨论室
                 </button>
-              </>
-            )}
-          </div>
+              ) : (
+                <p className="mt-4 text-sm text-ink-500">教师尚未分组，分组后即可进入阅读讨论室。</p>
+              )}
+            </div>
+          ))
+        )}
+        {!fetching && !classrooms.length && (
+          <p className="mt-6 rounded-2xl border border-white/60 bg-white px-6 py-8 text-center text-sm text-ink-500 shadow-soft">
+            还没有加入任何课堂，输入上方课堂码加入
+          </p>
         )}
       </main>
     </div>

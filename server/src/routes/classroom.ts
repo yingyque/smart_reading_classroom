@@ -40,6 +40,37 @@ router.get('/mine', authRequired, roleRequired('TEACHER'), async (req: AuthedReq
   return res.json(classrooms);
 });
 
+// 学生查看自己已加入的课堂列表（GroupMember ∪ Workspace 去重，与分组口径一致）
+// 注意：必须注册在 GET /:id 之前，否则 'joined' 会被当作 :id 吞掉
+router.get('/joined', authRequired, async (req: AuthedRequest, res: Response) => {
+  const [memberships, workspaces] = await Promise.all([
+    prisma.groupMember.findMany({
+      where: { userId: req.user!.id },
+      include: { group: { include: { classroom: { select: { id: true, name: true } } } } },
+    }),
+    prisma.workspace.findMany({
+      where: { userId: req.user!.id },
+      include: { classroom: { select: { id: true, name: true } } },
+    }),
+  ]);
+
+  const map = new Map<string, { id: string; name: string; groupName: string | null }>();
+  for (const m of memberships) {
+    map.set(m.group.classroom.id, {
+      id: m.group.classroom.id,
+      name: m.group.classroom.name,
+      groupName: m.group.name,
+    });
+  }
+  // 教师首次分组前加入的学生只有 Workspace 记录，需补齐
+  for (const w of workspaces) {
+    if (!map.has(w.classroom.id)) {
+      map.set(w.classroom.id, { id: w.classroom.id, name: w.classroom.name, groupName: null });
+    }
+  }
+  return res.json(Array.from(map.values()));
+});
+
 // 学生凭课堂码加入
 router.post('/join', authRequired, async (req: AuthedRequest, res: Response) => {
   const { code } = req.body as { code?: string };
