@@ -15,15 +15,47 @@ import {
   Trophy,
   MessageCircleQuestion,
   MessagesSquare,
+  Download,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../context/AuthContext';
-import { AnalyticsResult } from '../types';
+import { AnalyticsResult, QuestionLogItem } from '../types';
 import WordCloudPanel from '../components/charts/WordCloudPanel';
 import ActivityTimeline from '../components/charts/ActivityTimeline';
 import GroupCompare from '../components/charts/GroupCompare';
 import InteractionNetwork from '../components/charts/InteractionNetwork';
+
+// CSV 字段转义：引号包裹，内部引号翻倍，换行保留（Excel 可正确解析）
+function csvCell(v: string): string {
+  return `"${String(v ?? '').replace(/"/g, '""')}"`;
+}
+
+// 前端导出记录为 CSV（带 BOM，保证 Excel 打开中文不乱码）
+function downloadRecordsCsv(filename: string, rows: QuestionLogItem[], contentHeader: string) {
+  const header = ['时间', '学生', '小组', '文献', contentHeader];
+  const lines = [header.map(csvCell).join(',')];
+  for (const r of rows) {
+    lines.push(
+      [
+        new Date(r.createdAt).toLocaleString('zh-CN', { hour12: false }),
+        r.senderName,
+        r.groupName,
+        r.documentTitle ?? '',
+        r.content,
+      ]
+        .map(csvCell)
+        .join(','),
+    );
+  }
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function Analytics() {
   const { classroomId } = useParams();
@@ -143,6 +175,15 @@ export default function Analytics() {
             title={`学生提问记录（${data?.questions.length ?? 0} 条）`}
             icon={<MessageCircleQuestion size={16} />}
             className="lg:col-span-2"
+            action={
+              <button
+                onClick={() => downloadRecordsCsv(`学生提问记录_${new Date().toISOString().slice(0, 10)}.csv`, data?.questions ?? [], '提问内容')}
+                disabled={!(data?.questions ?? []).length}
+                className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Download size={13} /> 下载 CSV
+              </button>
+            }
           >
             <div className="max-h-96 overflow-auto">
               <table className="w-full text-sm">
@@ -193,6 +234,15 @@ export default function Analytics() {
             title={`小组互动记录（${data?.interactions.length ?? 0} 条）`}
             icon={<MessagesSquare size={16} />}
             className="lg:col-span-2"
+            action={
+              <button
+                onClick={() => downloadRecordsCsv(`小组互动记录_${new Date().toISOString().slice(0, 10)}.csv`, data?.interactions ?? [], '发言内容')}
+                disabled={!(data?.interactions ?? []).length}
+                className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Download size={13} /> 下载 CSV
+              </button>
+            }
           >
             <div className="max-h-96 overflow-auto">
               <table className="w-full text-sm">
@@ -323,19 +373,24 @@ function MetricCard({
 function ChartCard({
   title,
   icon,
+  action,
   children,
   className = '',
 }: {
   title: string;
   icon: React.ReactNode;
+  action?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
   return (
     <div className={`rounded-2xl border border-ink-900/5 bg-white p-5 shadow-soft ${className}`}>
-      <h3 className="mb-4 flex items-center gap-2 font-semibold text-ink-900">
-        <span className="text-brand-500">{icon}</span>
-        {title}
+      <h3 className="mb-4 flex items-center justify-between gap-2 font-semibold text-ink-900">
+        <span className="flex items-center gap-2">
+          <span className="text-brand-500">{icon}</span>
+          {title}
+        </span>
+        {action}
       </h3>
       {children}
     </div>
