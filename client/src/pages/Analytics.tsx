@@ -16,15 +16,18 @@ import {
   MessageCircleQuestion,
   MessagesSquare,
   Download,
+  X,
+  FileText,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../context/AuthContext';
-import { AnalyticsResult, QuestionLogItem } from '../types';
+import { AnalyticsResult, InteractionLogItem, QuestionLogItem } from '../types';
 import WordCloudPanel from '../components/charts/WordCloudPanel';
 import ActivityTimeline from '../components/charts/ActivityTimeline';
 import GroupCompare from '../components/charts/GroupCompare';
 import InteractionNetwork from '../components/charts/InteractionNetwork';
+import MarkdownContent from '../components/MarkdownContent';
 
 // CSV 字段转义：引号包裹，内部引号翻倍，换行保留（Excel 可正确解析）
 function csvCell(v: string): string {
@@ -32,21 +35,26 @@ function csvCell(v: string): string {
 }
 
 // 前端导出记录为 CSV（带 BOM，保证 Excel 打开中文不乱码）
-function downloadRecordsCsv(filename: string, rows: QuestionLogItem[], contentHeader: string) {
+// replyHeader 存在时额外导出配对的 AI 回答列（仅提问记录使用）
+function downloadRecordsCsv(
+  filename: string,
+  rows: (QuestionLogItem | InteractionLogItem)[],
+  contentHeader: string,
+  replyHeader?: string,
+) {
   const header = ['时间', '学生', '小组', '文献', contentHeader];
+  if (replyHeader) header.push(replyHeader);
   const lines = [header.map(csvCell).join(',')];
   for (const r of rows) {
-    lines.push(
-      [
-        new Date(r.createdAt).toLocaleString('zh-CN', { hour12: false }),
-        r.senderName,
-        r.groupName,
-        r.documentTitle ?? '',
-        r.content,
-      ]
-        .map(csvCell)
-        .join(','),
-    );
+    const cells = [
+      new Date(r.createdAt).toLocaleString('zh-CN', { hour12: false }),
+      r.senderName,
+      r.groupName,
+      r.documentTitle ?? '',
+      r.content,
+    ];
+    if (replyHeader) cells.push('aiReply' in r ? r.aiReply ?? '' : '');
+    lines.push(cells.map(csvCell).join(','));
   }
   const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -64,6 +72,8 @@ export default function Analytics() {
   const [data, setData] = useState<AnalyticsResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // 当前在弹窗中查看详情的提问记录
+  const [selectedQuestion, setSelectedQuestion] = useState<QuestionLogItem | null>(null);
   const socket = useMemo(() => getSocket(), []);
 
   const load = async (silent = false) => {
@@ -104,6 +114,16 @@ export default function Analytics() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classroomId, user, socket]);
+
+  // Esc 关闭问答详情弹窗
+  useEffect(() => {
+    if (!selectedQuestion) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedQuestion(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedQuestion]);
 
   if (loading) {
     return (
@@ -177,7 +197,7 @@ export default function Analytics() {
             className="lg:col-span-2"
             action={
               <button
-                onClick={() => downloadRecordsCsv(`学生提问记录_${new Date().toISOString().slice(0, 10)}.csv`, data?.questions ?? [], '提问内容')}
+                onClick={() => downloadRecordsCsv(`学生提问记录_${new Date().toISOString().slice(0, 10)}.csv`, data?.questions ?? [], '提问内容', 'AI 回答')}
                 disabled={!(data?.questions ?? []).length}
                 className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -185,6 +205,7 @@ export default function Analytics() {
               </button>
             }
           >
+            <p className="mb-2 text-xs text-ink-500">点击任意一条可查看完整问答（含 AI 回答）</p>
             <div className="max-h-96 overflow-auto">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-white text-left text-xs text-ink-500">
@@ -198,7 +219,12 @@ export default function Analytics() {
                 </thead>
                 <tbody>
                   {(data?.questions ?? []).map((q) => (
-                    <tr key={q.id} className="border-b border-ink-900/5 last:border-0 hover:bg-ink-900/[0.02]">
+                    <tr
+                      key={q.id}
+                      onClick={() => setSelectedQuestion(q)}
+                      title="点击查看完整问答"
+                      className="cursor-pointer border-b border-ink-900/5 last:border-0 hover:bg-brand-500/[0.04]"
+                    >
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-ink-500">
                         {new Date(q.createdAt).toLocaleString('zh-CN', {
                           month: 'numeric',
@@ -334,6 +360,68 @@ export default function Analytics() {
           </ChartCard>
         </div>
       </main>
+
+      {/* 问答详情弹窗：完整提问 + AI 回答 */}
+      {selectedQuestion && <QuestionDetailModal question={selectedQuestion} onClose={() => setSelectedQuestion(null)} />}
+    </div>
+  );
+}
+
+// 问答详情弹窗：点击遮罩或按 Esc 关闭
+function QuestionDetailModal({ question, onClose }: { question: QuestionLogItem; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 头部：学生信息 + 关闭按钮 */}
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 font-semibold text-ink-900">
+              {question.senderName}
+              <span className="text-sm font-normal text-ink-500">{question.groupName}</span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-3 text-xs text-ink-500">
+              <span>{new Date(question.createdAt).toLocaleString('zh-CN', { hour12: false })}</span>
+              {question.documentTitle && (
+                <span className="flex items-center gap-1">
+                  <FileText size={12} />
+                  {question.documentTitle}
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-500 hover:bg-ink-900/5"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* 学生提问 */}
+        <div className="rounded-xl bg-brand-500/[0.06] px-4 py-3 text-sm leading-relaxed text-ink-900 whitespace-pre-wrap break-all">
+          {question.content}
+        </div>
+
+        {/* AI 回答 */}
+        <div className="mt-3 rounded-xl bg-violet-500/[0.08] px-4 py-3">
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-violet-500">
+            <Bot size={14} /> AI 回答
+          </div>
+          {question.aiReply ? (
+            <div className="text-sm leading-relaxed text-ink-900">
+              <MarkdownContent content={question.aiReply} />
+            </div>
+          ) : (
+            <p className="text-sm text-ink-500">该提问未收到 AI 回复（可能超时或调用失败）</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

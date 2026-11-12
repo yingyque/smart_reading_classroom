@@ -114,7 +114,25 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
 
   const network = buildNetwork(peerMessages, groups);
 
-  // 学生原始提问记录（向 AI 提问的原文），最新在前
+  // 提问与 AI 回复配对：消息按时间升序，同一学生同一小组内，
+  // 每条 AI 回复归属其之前最近一条尚未配对的提问（单用户提问串行，一一对应）
+  const replyByQuestion = new Map<string, string>();
+  const pendingQuestion = new Map<string, string>(); // key: senderId:groupId -> 待配对提问 id
+  for (const m of messages) {
+    if (m.type !== 'AI') continue;
+    const key = `${m.senderId}:${m.groupId}`;
+    if (!m.isAiReply) {
+      pendingQuestion.set(key, m.id);
+    } else {
+      const qId = pendingQuestion.get(key);
+      if (qId) {
+        replyByQuestion.set(qId, m.content);
+        pendingQuestion.delete(key);
+      }
+    }
+  }
+
+  // 学生原始提问记录（向 AI 提问的原文 + 配对的 AI 回复），最新在前
   const questions: QuestionLogItem[] = aiMessages
     .map((m) => ({
       id: m.id,
@@ -124,6 +142,7 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
       documentTitle: m.document?.title ?? null,
       content: m.content,
       createdAt: m.createdAt,
+      aiReply: replyByQuestion.get(m.id) ?? null,
     }))
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 

@@ -91,10 +91,20 @@ export interface QuestionLogItem {
   documentTitle: string | null;
   content: string;
   createdAt: string;
+  /** 与该提问配对的 AI 回复内容（未收到回复时为 null） */
+  aiReply: string | null;
 }
 
-// 小组互动记录与提问记录结构相同（学生发出的消息原文）
-export type InteractionLogItem = QuestionLogItem;
+// 小组互动记录（学生间聊天原文）；提问记录额外携带配对的 AI 回复，两者结构不再相同
+export interface InteractionLogItem {
+  id: string;
+  senderId: string;
+  senderName: string;
+  groupName: string;
+  documentTitle: string | null;
+  content: string;
+  createdAt: string;
+}
 
 export interface AnalyticsResult {
   peerMessageCount: number;
