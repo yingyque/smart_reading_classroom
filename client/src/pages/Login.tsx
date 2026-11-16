@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpenText, GraduationCap, Users, Loader2 } from 'lucide-react';
+import { BookOpenText, GraduationCap, Users, Loader2, Eye, EyeOff } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { Role } from '../types';
@@ -14,6 +14,7 @@ export default function Login() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -131,14 +132,24 @@ export default function Login() {
               />
             </Field>
             <Field label="密码">
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && submit()}
-                placeholder="请输入密码"
-                className="w-full border-0 bg-transparent text-ink-900 outline-none placeholder:text-ink-500/50"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type={showPwd ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && submit()}
+                  placeholder="请输入密码"
+                  className="w-full border-0 bg-transparent text-ink-900 outline-none placeholder:text-ink-500/50"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPwd((v) => !v)}
+                  title={showPwd ? '隐藏密码' : '查看明文'}
+                  className="shrink-0 rounded-lg p-1 text-ink-500 transition-colors hover:bg-ink-900/5 hover:text-ink-900"
+                >
+                  {showPwd ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </div>
             </Field>
           </div>
 
