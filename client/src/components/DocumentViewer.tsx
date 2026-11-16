@@ -691,8 +691,8 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPa
         )}
       </div>
 
-      {/* 页面容器 */}
-      <div ref={containerRef} className="mx-auto max-w-[900px] px-2 py-3" />
+      {/* 页面容器（1350 = 900×1.5，PDF 放大 1.5 倍；窄屏自动填满可用宽度） */}
+      <div ref={containerRef} className="mx-auto max-w-[1350px] px-2 py-3" />
 
       {/* 选中文字后的高亮色板 */}
       {selPopup && (
