@@ -81,7 +81,10 @@ export default function DocumentViewer({ docId, classroomId, notesVersion, onNot
       .get(`/notes/${classroomId}/mine`)
       .then((res) =>
         setHighlights(
-          (res.data as NoteItem[]).filter((n) => n.kind === 'highlight' && n.documentId === docId),
+          // 组员高亮在笔记面板互见即可；PDF 页面上只画本人的（避免无法区分归属）
+          (res.data as NoteItem[]).filter(
+            (n) => n.kind === 'highlight' && n.documentId === docId && n.mine !== false,
+          ),
         ),
       )
       .catch((err) => console.error('加载高亮失败', err));

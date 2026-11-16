@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NotebookPen, FileText, Pencil, Trash2, Loader2, X, Check } from 'lucide-react';
+import { NotebookPen, FileText, Pencil, Trash2, Loader2, X, Check, Users } from 'lucide-react';
 import { api } from '../lib/api';
 import { NoteItem, DocumentLite } from '../types';
 import { cn } from '../lib/cn';
@@ -22,7 +22,7 @@ const HL_QUOTE_STYLE: Record<string, string> = {
   yellow: 'border-amber-400 bg-amber-50 text-amber-900',
 };
 
-// 学生学习笔记面板：仅本人与课堂教师可见
+// 学生学习笔记面板：本人笔记可编辑，同小组组员笔记只读互见
 export default function NotePanel({ classroomId, documentId, documents, refreshKey, onNotesChanged }: Props) {
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [input, setInput] = useState('');
@@ -121,13 +121,24 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
             阅读时随手记下你的想法…
           </div>
         ) : (
-          notes.map((n) => (
+          notes.map((n) => {
+            const isMine = n.mine !== false;
+            return (
             <div
               key={n.id}
-              className="group rounded-xl border border-ink-900/5 bg-[#f7f8fa] px-3.5 py-2.5"
+              className={cn(
+                'group rounded-xl border px-3.5 py-2.5',
+                isMine ? 'border-ink-900/5 bg-[#f7f8fa]' : 'border-brand-100 bg-brand-50/40',
+              )}
             >
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-500">
+                  {!isMine && n.studentName && (
+                    <span className="flex shrink-0 items-center gap-0.5 rounded-full bg-brand-100 px-1.5 py-0.5 font-medium text-brand-700">
+                      <Users size={10} />
+                      {n.studentName}
+                    </span>
+                  )}
                   <FileText size={12} className="shrink-0 text-brand-500" />
                   <span className="truncate">{n.documentTitle ?? '未关联文献'}</span>
                 </span>
@@ -139,7 +150,7 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
                     hour: '2-digit',
                     minute: '2-digit',
                   })}
-                  {editingId !== n.id && (
+                  {isMine && editingId !== n.id && (
                     <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                       <button
                         onClick={() => startEdit(n)}
@@ -214,14 +225,14 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
                     <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-900">
                       {n.content}
                     </p>
-                  ) : (
+                  ) : isMine ? (
                     <button
                       onClick={() => startEdit(n)}
                       className="text-xs text-ink-400 italic hover:text-brand-600"
                     >
                       点击补充评论…
                     </button>
-                  )}
+                  ) : null}
                 </div>
               ) : (
                 <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-900">
@@ -229,7 +240,8 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
                 </p>
               )}
             </div>
-          ))
+            );
+          })
         )}
       </div>
 

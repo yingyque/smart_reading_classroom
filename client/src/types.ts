@@ -55,9 +55,14 @@ export interface DocumentDetail extends DocumentLite {
   content: string;
 }
 
-// 学生学习笔记（学生端本人视角）
+// 学生学习笔记（学生端视角：本人 + 组内互见）
 export interface NoteItem {
   id: string;
+  /** 作者 id（组内互见后区分归属） */
+  userId?: string;
+  studentName?: string;
+  /** 是否本人笔记（本人可编辑删除，组员只读） */
+  mine?: boolean;
   documentId: string | null;
   documentTitle: string | null;
   content: string;

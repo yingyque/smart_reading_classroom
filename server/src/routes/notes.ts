@@ -13,20 +13,40 @@ async function isClassroomMember(classroomId: string, userId: string): Promise<b
   return !!(ws || member);
 }
 
-// 学生本人笔记列表（仅本人可见；时间线按 updatedAt 倒序）
+// 学生笔记列表：本人 + 同小组成员的笔记（组内互见；未分组则只见本人）
 router.get('/:classroomId/mine', authRequired, async (req: AuthedRequest, res: Response) => {
   const { classroomId } = req.params;
-  if (!(await isClassroomMember(classroomId, req.user!.id))) {
+  const meId = req.user!.id;
+  if (!(await isClassroomMember(classroomId, meId))) {
     return res.status(403).json({ error: '你尚未加入此课堂' });
   }
+  // 本人在此课堂加入的小组 → 组内全部成员（含自己；可能多组取并集）
+  const myGroups = await prisma.groupMember.findMany({
+    where: { userId: meId, group: { classroomId } },
+    select: { groupId: true },
+  });
+  const memberIds = new Set<string>([meId]);
+  if (myGroups.length) {
+    const mates = await prisma.groupMember.findMany({
+      where: { groupId: { in: myGroups.map((g) => g.groupId) } },
+      select: { userId: true },
+    });
+    for (const m of mates) memberIds.add(m.userId);
+  }
   const notes = await prisma.note.findMany({
-    where: { classroomId, userId: req.user!.id },
-    include: { document: { select: { title: true } } },
+    where: { classroomId, userId: { in: [...memberIds] } },
+    include: {
+      user: { select: { id: true, name: true } },
+      document: { select: { title: true } },
+    },
     orderBy: { updatedAt: 'desc' },
   });
   return res.json(
     notes.map((n) => ({
       id: n.id,
+      userId: n.user.id,
+      studentName: n.user.name,
+      mine: n.user.id === meId,
       documentId: n.documentId,
       documentTitle: n.document?.title ?? null,
       content: n.content,
