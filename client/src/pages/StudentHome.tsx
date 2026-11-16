@@ -177,6 +177,8 @@ function Nav({ name, onLogout, onOpenSettings }: { name?: string; onLogout: () =
           <BookOpenText size={18} />
         </div>
         智慧阅读
+      </div>
+      <div className="flex items-center gap-4">
         <button
           onClick={onOpenSettings}
           title="设置"
@@ -184,8 +186,6 @@ function Nav({ name, onLogout, onOpenSettings }: { name?: string; onLogout: () =
         >
           <Settings size={17} />
         </button>
-      </div>
-      <div className="flex items-center gap-4">
         <span className="text-sm text-ink-500">{name} · 学生</span>
         <button onClick={onLogout} className="flex items-center gap-1 text-sm text-ink-500 hover:text-red-600">
           <LogOut size={16} /> 退出

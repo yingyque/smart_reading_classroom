@@ -68,13 +68,6 @@ export default function ReadingRoom() {
           <div className="flex items-center gap-2 font-bold text-ink-900">
             <BookOpenText size={18} className="text-brand-500" />
             智慧阅读
-            <button
-              onClick={() => setSettingsOpen(true)}
-              title="设置"
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-500 transition-colors hover:bg-ink-900/5 hover:text-ink-900"
-            >
-              <Settings size={17} />
-            </button>
           </div>
           {/* 文献切换 */}
           <div className="relative ml-4">
@@ -112,6 +105,13 @@ export default function ReadingRoom() {
         <div className="flex items-center gap-3 text-sm text-ink-500">
           <span className="rounded-full bg-teal-500/10 px-3 py-1 font-medium text-teal-500">{group.name}</span>
           <span>{user?.name}</span>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            title="设置"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-500 transition-colors hover:bg-ink-900/5 hover:text-ink-900"
+          >
+            <Settings size={17} />
+          </button>
         </div>
       </header>
 
