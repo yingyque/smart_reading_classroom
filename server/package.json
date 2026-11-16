@@ -17,6 +17,7 @@
   "dependencies": {
     "@node-rs/jieba": "^2.0.4",
     "@prisma/client": "^5.22.0",
+    "@tencent-qqmail/agently-cli": "^1.0.18",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

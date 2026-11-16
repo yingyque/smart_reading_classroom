@@ -37,10 +37,15 @@ services:
       WORKSPACE_MAX_CONCURRENT: ${WORKSPACE_MAX_CONCURRENT:-6}
       # 排队等待上限（毫秒）
       WORKSPACE_QUEUE_WAIT_MS: ${WORKSPACE_QUEUE_WAIT_MS:-180000}
+      # Agent 邮箱（忘记密码发信）：workspace 与宿主机 agently-cli 授权目录保持一致
+      AGENTLY_WORKSPACE: codebuddy
     volumes:
       - server-uploads:/app/uploads
       # 管理学生 AI 工作台容器
       - /var/run/docker.sock:/var/run/docker.sock
+      # Agent 邮箱 OAuth 凭据（宿主机 agently-cli auth login 生成，两处目录都要挂）
+      - /root/.agently-cli:/root/.agently-cli
+      - /root/.local/share/agently-cli:/root/.local/share/agently-cli
     depends_on:
       db:
         condition: service_healthy

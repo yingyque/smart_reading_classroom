@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   BookOpenText,
   Container as ContainerIcon,
+  Download,
   GraduationCap,
   Loader2,
   LogOut,
@@ -185,6 +186,50 @@ export default function AdminDashboard() {
     }
   };
 
+  // 导出学生名单 CSV（含转义与 BOM，Excel 打开中文不乱码）
+  const exportStudentsCsv = () => {
+    const esc = (v: string | number) => {
+      const s = String(v);
+      return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = [
+      '姓名',
+      '注册时间',
+      '邮箱',
+      '加入课堂数',
+      '容器总数',
+      '运行中容器',
+      '已暂停容器',
+      'AI Key',
+      'AI 提问次数',
+      '输入 Tokens',
+      '输出 Tokens',
+      '估算 Tokens（历史）',
+    ];
+    const rows = students.map((s) => [
+      s.name,
+      new Date(s.createdAt).toLocaleString('zh-CN'),
+      s.email,
+      s.classroomCount,
+      s.containers.total,
+      s.containers.running,
+      s.containers.paused,
+      s.keyActivated ? '已激活' : '未激活',
+      s.aiUsage.questions,
+      s.aiUsage.inputTokens,
+      s.aiUsage.outputTokens,
+      s.aiUsage.estimatedTokens,
+    ]);
+    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `学生名单_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const tabs: [Tab, string, JSX.Element][] = [
     ['teachers', '教师', <GraduationCap key="t" size={15} />],
     ['students', '学生', <Users key="s" size={15} />],
@@ -363,6 +408,18 @@ export default function AdminDashboard() {
 
                 {tab === 'students' && (
                   <section className="overflow-hidden rounded-2xl border border-ink-900/5 bg-white shadow-soft">
+                    <div className="flex items-center justify-between border-b border-ink-900/5 px-4 py-3">
+                      <span className="text-sm font-semibold text-ink-900">
+                        学生列表<span className="ml-2 text-xs font-normal text-ink-500">共 {students.length} 人</span>
+                      </span>
+                      <button
+                        onClick={exportStudentsCsv}
+                        disabled={!students.length}
+                        className="flex items-center gap-1 rounded-lg border border-ink-900/10 px-3 py-1.5 text-xs text-ink-500 transition hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Download size={13} /> 导出 CSV
+                      </button>
+                    </div>
                     <table className="w-full text-sm">
                       <thead className="bg-ink-900/[0.03] text-xs text-ink-500">
                         <tr>

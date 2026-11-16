@@ -59,6 +59,10 @@ router.post(
     }
 
     const title = (req.body.title as string) || originalName.replace(/\.[^.]+$/, '');
+    const maxOrder = await prisma.document.aggregate({
+      where: { classroomId: classroom.id },
+      _max: { order: true },
+    });
     const doc = await prisma.document.create({
       data: {
         classroomId: classroom.id,
@@ -67,6 +71,7 @@ router.post(
         fileType,
         filePath: req.file.path,
         content,
+        order: (maxOrder._max.order ?? -1) + 1, // 新文献排到最后
       },
     });
 
@@ -103,12 +108,64 @@ router.get('/doc/:docId', authRequired, async (req: AuthedRequest, res: Response
   });
 });
 
+// 教师删除文献（关联消息的 documentId 为 SetNull，消息会保留）
+router.delete('/doc/:docId', authRequired, roleRequired('TEACHER'), async (req: AuthedRequest, res: Response) => {
+  const doc = await prisma.document.findUnique({
+    where: { id: req.params.docId },
+    include: { classroom: { select: { teacherId: true } } },
+  });
+  if (!doc) return res.status(404).json({ error: '文献不存在' });
+  if (doc.classroom.teacherId !== req.user!.id) {
+    return res.status(403).json({ error: '无权操作此课堂' });
+  }
+  await prisma.document.delete({ where: { id: doc.id } });
+  // 数据库已删，磁盘文件删除失败只记日志
+  fs.promises.unlink(doc.filePath).catch((err) => {
+    console.error('[documents] 删除文件失败:', (err as Error).message);
+  });
+  return res.json({ ok: true });
+});
+
+// 教师手动排序：接收完整顺序的文献 id 数组
+router.post(
+  '/:classroomId/reorder',
+  authRequired,
+  roleRequired('TEACHER'),
+  async (req: AuthedRequest, res: Response) => {
+    const { orderedIds } = req.body as { orderedIds?: unknown };
+    if (
+      !Array.isArray(orderedIds) ||
+      orderedIds.some((id) => typeof id !== 'string')
+    ) {
+      return res.status(400).json({ error: '参数错误' });
+    }
+    const classroom = await prisma.classroom.findUnique({ where: { id: req.params.classroomId } });
+    if (!classroom || classroom.teacherId !== req.user!.id) {
+      return res.status(403).json({ error: '无权操作此课堂' });
+    }
+    const docs = await prisma.document.findMany({
+      where: { classroomId: classroom.id },
+      select: { id: true },
+    });
+    const idSet = new Set(docs.map((d) => d.id));
+    if (orderedIds.length !== docs.length || orderedIds.some((id) => !idSet.has(id))) {
+      return res.status(400).json({ error: '文献列表已变化，请刷新后重试' });
+    }
+    await prisma.$transaction(
+      orderedIds.map((id, idx) =>
+        prisma.document.update({ where: { id }, data: { order: idx } }),
+      ),
+    );
+    return res.json({ ok: true });
+  },
+);
+
 // 课堂文献列表
 router.get('/:classroomId', authRequired, async (req: AuthedRequest, res: Response) => {
   const docs = await prisma.document.findMany({
     where: { classroomId: req.params.classroomId },
     select: { id: true, title: true, fileType: true, fileName: true, createdAt: true },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ order: 'asc' }, { createdAt: 'desc' }],
   });
   return res.json(docs);
 });

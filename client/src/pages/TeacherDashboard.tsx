@@ -16,6 +16,7 @@ import {
   Pause,
   Play,
   Trash2,
+  GripVertical,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -48,6 +49,7 @@ export default function TeacherDashboard() {
   const [unassigned, setUnassigned] = useState<{ id: string; name: string }[]>([]);
   const [groupCount, setGroupCount] = useState(4);
   const [dragging, setDragging] = useState<string | null>(null); // 拖拽中/已选中的学生 userId
+  const [docDragId, setDocDragId] = useState<string | null>(null); // 拖拽排序中的文献 id
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary | null>(null);
   const [newName, setNewName] = useState('');
@@ -154,6 +156,38 @@ export default function TeacherDashboard() {
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const deleteDoc = async (docId: string) => {
+    if (!active) return;
+    if (!confirm('删除该文献？相关讨论消息会保留，但不再关联此文献。')) return;
+    try {
+      await api.delete(`/documents/doc/${docId}`);
+      setDocuments((prev) => prev.filter((d) => d.id !== docId));
+    } catch (err: any) {
+      console.error('删除文献失败', err);
+      alert(err.response?.data?.error || '删除文献失败');
+    }
+  };
+
+  // 拖拽排序：把 dragId 文献移动到 targetId 的位置（乐观更新，失败回滚）
+  const reorderDocs = async (dragId: string, targetId: string) => {
+    if (!active || dragId === targetId) return;
+    const old = documents;
+    const from = old.findIndex((d) => d.id === dragId);
+    const to = old.findIndex((d) => d.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...old];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setDocuments(next);
+    try {
+      await api.post(`/documents/${active.id}/reorder`, { orderedIds: next.map((d) => d.id) });
+    } catch (err: any) {
+      console.error('文献排序失败', err);
+      setDocuments(old);
+      alert(err.response?.data?.error || '文献排序失败');
     }
   };
 
@@ -382,17 +416,55 @@ export default function TeacherDashboard() {
                 </div>
                 <div className="mt-4 space-y-2">
                   {documents.map((d) => (
-                    <div key={d.id} className="flex items-center justify-between rounded-lg border border-ink-900/5 px-4 py-2.5">
+                    <div
+                      key={d.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', d.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                        setDocDragId(d.id);
+                      }}
+                      onDragEnd={() => setDocDragId(null)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const dragId = e.dataTransfer.getData('text/plain') || docDragId;
+                        setDocDragId(null);
+                        if (dragId) reorderDocs(dragId, d.id);
+                      }}
+                      className={`flex items-center justify-between rounded-lg border px-4 py-2.5 transition-all ${
+                        docDragId === d.id
+                          ? 'border-brand-500 bg-brand-50/50 opacity-50'
+                          : docDragId
+                            ? 'border-brand-500/40'
+                            : 'border-ink-900/5'
+                      } ${documents.length > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                    >
                       <div className="flex items-center gap-3">
+                        {documents.length > 1 && (
+                          <GripVertical size={16} className="shrink-0 text-ink-400" />
+                        )}
                         <span className="rounded bg-brand-50 px-2 py-0.5 text-xs font-semibold uppercase text-brand-600">
                           {d.fileType}
                         </span>
                         <span className="text-sm text-ink-900">{d.title}</span>
                       </div>
-                      <span className="text-xs text-ink-500">{new Date(d.createdAt).toLocaleString('zh-CN')}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-ink-500">{new Date(d.createdAt).toLocaleString('zh-CN')}</span>
+                        <button
+                          onClick={() => deleteDoc(d.id)}
+                          title="删除文献"
+                          className="rounded-lg p-1.5 text-ink-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                   {!documents.length && <p className="py-3 text-center text-sm text-ink-500">还没有上传文献</p>}
+                  {!!documents.length && documents.length > 1 && (
+                    <p className="pt-1 text-center text-xs text-ink-400">按住文献行可拖动调整顺序，顺序即学生端展示顺序</p>
+                  )}
                 </div>
               </section>
 

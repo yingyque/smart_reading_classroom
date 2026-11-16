@@ -9,7 +9,7 @@ import { cn } from '../lib/cn';
 export default function Login() {
   const navigate = useNavigate();
   const { setAuth } = useAuth();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [role, setRole] = useState<Role>('STUDENT');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -17,9 +17,27 @@ export default function Login() {
   const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
   const submit = async () => {
     setError('');
+    if (mode === 'forgot') {
+      if (!email.trim()) {
+        setError('请填写邮箱');
+        return;
+      }
+      setLoading(true);
+      try {
+        await api.post('/auth/forgot-password', { email: email.trim() });
+        setForgotSent(true);
+      } catch (err: any) {
+        console.error('忘记密码失败', err);
+        setError(err.response?.data?.error || '操作失败，请重试');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (!email || !password || (mode === 'register' && !name)) {
       setError('请填写完整信息');
       return;
@@ -38,6 +56,12 @@ export default function Login() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const backToLogin = () => {
+    setMode('login');
+    setForgotSent(false);
+    setError('');
   };
 
   return (
@@ -69,20 +93,22 @@ export default function Login() {
 
         {/* 表单卡片 */}
         <div className="glass animate-fade-in-up rounded-3xl border border-white/60 p-8 shadow-glass">
-          <div className="mb-6 flex rounded-xl bg-ink-900/5 p-1">
-            {(['login', 'register'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={cn(
-                  'flex-1 rounded-lg py-2 text-sm font-semibold transition-all',
-                  mode === m ? 'bg-white text-brand-600 shadow-soft' : 'text-ink-500 hover:text-ink-900',
-                )}
-              >
-                {m === 'login' ? '登录' : '注册'}
-              </button>
-            ))}
-          </div>
+          {mode !== 'forgot' && (
+            <div className="mb-6 flex rounded-xl bg-ink-900/5 p-1">
+              {(['login', 'register'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={cn(
+                    'flex-1 rounded-lg py-2 text-sm font-semibold transition-all',
+                    mode === m ? 'bg-white text-brand-600 shadow-soft' : 'text-ink-500 hover:text-ink-900',
+                  )}
+                >
+                  {m === 'login' ? '登录' : '注册'}
+                </button>
+              ))}
+            </div>
+          )}
 
           {mode === 'register' && (
             <div className="mb-4 grid grid-cols-2 gap-3">
@@ -111,6 +137,10 @@ export default function Login() {
             </div>
           )}
 
+          {mode === 'forgot' && (
+            <p className="mb-3 text-sm text-ink-500">输入注册邮箱，系统会把一个随机新密码发送到该邮箱。</p>
+          )}
+
           <div className="space-y-3">
             {mode === 'register' && (
               <Field label="姓名">
@@ -127,11 +157,13 @@ export default function Login() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
                 placeholder="you@example.com"
                 className="w-full border-0 bg-transparent text-ink-900 outline-none placeholder:text-ink-500/50"
               />
             </Field>
-            <Field label="密码">
+            {mode !== 'forgot' && (
+              <Field label="密码">
               <div className="flex items-center gap-2">
                 <input
                   type={showPwd ? 'text' : 'password'}
@@ -150,9 +182,15 @@ export default function Login() {
                   {showPwd ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
               </div>
-            </Field>
+              </Field>
+            )}
           </div>
 
+          {mode === 'forgot' && forgotSent && (
+            <p className="mt-3 rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">
+              新密码已发送到 {email.trim()}，请登录邮箱查收后再登录。
+            </p>
+          )}
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
           <button
@@ -161,8 +199,30 @@ export default function Login() {
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-violet-500 py-3 font-semibold text-white shadow-glass transition-all hover:shadow-lg active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
           >
             {loading && <Loader2 size={18} className="animate-spin" />}
-            {mode === 'login' ? '登录' : '注册并进入'}
+            {mode === 'forgot' ? '发送新密码' : mode === 'login' ? '登录' : '注册并进入'}
           </button>
+
+          {mode === 'forgot' ? (
+            <button
+              type="button"
+              onClick={backToLogin}
+              className="mt-3 w-full text-center text-sm text-ink-500 transition-colors hover:text-brand-600"
+            >
+              返回登录
+            </button>
+          ) : mode === 'login' ? (
+            <button
+              type="button"
+              onClick={() => {
+                setMode('forgot');
+                setForgotSent(false);
+                setError('');
+              }}
+              className="mt-4 w-full text-center text-sm text-ink-500 transition-colors hover:text-brand-600"
+            >
+              忘记密码？
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

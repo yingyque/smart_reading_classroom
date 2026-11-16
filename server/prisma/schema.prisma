@@ -78,6 +78,7 @@ model Document {
   fileType    String // pdf | docx | txt
   filePath    String // 本地存储路径
   content     String @db.Text // 抽取出的纯文本（用于 AI 上下文与分析）
+  order       Int    @default(0) // 手动排序序号（越小越靠前）
   createdAt   DateTime @default(now())
 
   classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)

@@ -3,12 +3,18 @@ import { Loader2, Settings, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 
-/** 设置弹窗：修改姓名（保存后全局生效，无需重新登录） */
+/** 设置弹窗：修改姓名（保存后全局生效，无需重新登录）、修改密码（需校验原密码） */
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const { user, updateUser } = useAuth();
   const [name, setName] = useState(user?.name || '');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [oldPwd, setOldPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [pwdError, setPwdError] = useState('');
+  const [pwdSaving, setPwdSaving] = useState(false);
+  const [pwdDone, setPwdDone] = useState(false);
 
   const save = async () => {
     const trimmed = name.trim();
@@ -31,6 +37,36 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       setError(err.response?.data?.error || '保存失败，请稍后再试');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const changePassword = async () => {
+    setPwdError('');
+    setPwdDone(false);
+    if (!oldPwd || !newPwd || !confirmPwd) {
+      setPwdError('请填写完整');
+      return;
+    }
+    if (newPwd.length < 6) {
+      setPwdError('新密码至少 6 位');
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      setPwdError('两次输入的新密码不一致');
+      return;
+    }
+    setPwdSaving(true);
+    try {
+      await api.patch('/auth/password', { oldPassword: oldPwd, newPassword: newPwd });
+      setOldPwd('');
+      setNewPwd('');
+      setConfirmPwd('');
+      setPwdDone(true);
+    } catch (err: any) {
+      console.error('密码修改失败', err);
+      setPwdError(err.response?.data?.error || '密码修改失败，请稍后再试');
+    } finally {
+      setPwdSaving(false);
     }
   };
 
@@ -72,6 +108,46 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               disabled
               className="w-full cursor-not-allowed rounded-xl border border-ink-900/10 bg-ink-900/5 px-4 py-2.5 text-sm text-ink-500"
             />
+          </div>
+        </div>
+
+        <div className="mt-5 border-t border-ink-900/10 pt-4">
+          <label className="mb-1 block text-sm font-medium text-ink-700">修改密码</label>
+          <div className="space-y-2">
+            <input
+              type="password"
+              placeholder="原密码"
+              value={oldPwd}
+              onChange={(e) => setOldPwd(e.target.value)}
+              className="w-full rounded-xl border border-ink-900/10 bg-white px-4 py-2.5 text-ink-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
+            <input
+              type="password"
+              placeholder="新密码（至少 6 位）"
+              value={newPwd}
+              onChange={(e) => setNewPwd(e.target.value)}
+              className="w-full rounded-xl border border-ink-900/10 bg-white px-4 py-2.5 text-ink-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
+            <input
+              type="password"
+              placeholder="确认新密码"
+              value={confirmPwd}
+              onChange={(e) => setConfirmPwd(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && changePassword()}
+              className="w-full rounded-xl border border-ink-900/10 bg-white px-4 py-2.5 text-ink-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
+          </div>
+          {pwdError && <p className="mt-2 text-sm text-red-600">{pwdError}</p>}
+          {pwdDone && !pwdError && <p className="mt-2 text-sm text-green-600">密码已修改</p>}
+          <div className="mt-3 flex justify-end">
+            <button
+              onClick={changePassword}
+              disabled={pwdSaving}
+              className="flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-brand-600 active:scale-95 disabled:opacity-70"
+            >
+              {pwdSaving && <Loader2 size={15} className="animate-spin" />}
+              修改密码
+            </button>
           </div>
         </div>
 
