@@ -47,7 +47,7 @@ export default function TeacherDashboard() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [unassigned, setUnassigned] = useState<{ id: string; name: string }[]>([]);
   const [groupCount, setGroupCount] = useState(4);
-  const [dragging, setDragging] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null); // 拖拽中/已选中的学生 userId
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary | null>(null);
   const [newName, setNewName] = useState('');
@@ -215,6 +215,17 @@ export default function TeacherDashboard() {
     setDropTarget(null);
     const uid = e.dataTransfer.getData('text/plain');
     if (uid) moveStudent(uid, target);
+  };
+
+  // 点击兜底（触屏设备无法拖拽）：点击学生选中，再点击目标组/未分组池完成移动
+  const selectStudent = (id: string) => {
+    setDragging((prev) => (prev === id ? null : id));
+  };
+
+  const clickMoveTo = (target: string | null) => {
+    if (!dragging) return;
+    moveStudent(dragging, target);
+    setDragging(null);
   };
 
   const copyCode = async () => {
@@ -414,10 +425,10 @@ export default function TeacherDashboard() {
                   >
                     <Plus size={16} /> 添加分组
                   </button>
-                  <span className="text-xs text-ink-500">随机分组会重新分配全部学生；也可直接拖拽学生卡片手动调整</span>
+                  <span className="text-xs text-ink-500">随机分组会重新分配全部学生；调整分组：拖拽学生卡片，或先点击学生选中、再点击目标分组</span>
                 </div>
 
-                {/* 未分组学生池（可拖入下方任意组） */}
+                {/* 未分组学生池（可拖入下方任意组，也可点击选中后点目标组） */}
                 <div
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -425,13 +436,16 @@ export default function TeacherDashboard() {
                   }}
                   onDragLeave={() => setDropTarget((t) => (t === 'pool' ? null : t))}
                   onDrop={(e) => onDropTo(e, null)}
+                  onClick={() => clickMoveTo(null)}
                   className={`mt-5 rounded-xl border-2 border-dashed p-4 transition-all ${
-                    dropTarget === 'pool' ? 'border-brand-500 bg-brand-50/50' : 'border-ink-900/10 bg-[#f7f8fa]'
-                  }`}
+                    dropTarget === 'pool' || (dragging && !dropTarget)
+                      ? 'border-brand-500 bg-brand-50/50'
+                      : 'border-ink-900/10 bg-[#f7f8fa]'
+                  } ${dragging ? 'cursor-pointer' : ''}`}
                 >
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-sm font-semibold text-ink-900">未分组学生</span>
-                    <span className="text-xs text-ink-500">{unassigned.length} 人 · 可拖入下方任意分组</span>
+                    <span className="text-xs text-ink-500">{unassigned.length} 人 · 拖入或点选后移到下方分组</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {unassigned.map((s) => (
@@ -439,9 +453,10 @@ export default function TeacherDashboard() {
                         key={s.id}
                         id={s.id}
                         name={s.name}
-                        dimmed={dragging === s.id}
+                        selected={dragging === s.id}
                         onDragStart={setDragging}
                         onDragEnd={() => setDragging(null)}
+                        onSelect={selectStudent}
                       />
                     ))}
                     {!unassigned.length && <span className="text-xs text-ink-500">暂无未分组学生</span>}
@@ -458,18 +473,22 @@ export default function TeacherDashboard() {
                       }}
                       onDragLeave={() => setDropTarget((t) => (t === g.id ? null : t))}
                       onDrop={(e) => onDropTo(e, g.id)}
+                      onClick={() => clickMoveTo(g.id)}
                       className={`rounded-xl border p-4 transition-all ${
-                        dropTarget === g.id
+                        dropTarget === g.id || (dragging && !dropTarget)
                           ? 'border-brand-500 bg-brand-50/50 ring-2 ring-brand-500/20'
                           : 'border-ink-900/5 bg-[#f7f8fa]'
-                      }`}
+                      } ${dragging ? 'cursor-pointer' : ''}`}
                     >
                       <div className="mb-2 flex items-center justify-between">
                         <span className="font-semibold text-ink-900">{g.name}</span>
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs text-ink-500">{g.members.length} 人</span>
                           <button
-                            onClick={() => deleteGroup(g.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteGroup(g.id);
+                            }}
                             title="删除分组"
                             className="rounded p-1 text-ink-400 transition-colors hover:bg-red-50 hover:text-red-500"
                           >
@@ -483,12 +502,13 @@ export default function TeacherDashboard() {
                             key={m.userId}
                             id={m.userId}
                             name={m.user.name}
-                            dimmed={dragging === m.userId}
+                            selected={dragging === m.userId}
                             onDragStart={setDragging}
                             onDragEnd={() => setDragging(null)}
+                            onSelect={selectStudent}
                           />
                         ))}
-                        {!g.members.length && <span className="text-xs text-ink-500">拖拽学生到此处</span>}
+                        {!g.members.length && <span className="text-xs text-ink-500">拖拽或点选学生移入此处</span>}
                       </div>
                     </div>
                   ))}
@@ -607,19 +627,21 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
-// 可拖拽的学生卡片：dataTransfer 携带 userId，供组卡片/未分组池 onDrop 读取
+// 学生卡片：桌面可拖拽（dataTransfer 携带 userId），触屏可点击选中后点目标组移动
 function StudentChip({
   id,
   name,
-  dimmed,
+  selected,
   onDragStart,
   onDragEnd,
+  onSelect,
 }: {
   id: string;
   name: string;
-  dimmed: boolean;
+  selected: boolean;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
+  onSelect: (id: string) => void;
 }) {
   return (
     <span
@@ -630,8 +652,14 @@ function StudentChip({
         onDragStart(id);
       }}
       onDragEnd={onDragEnd}
-      className={`cursor-grab select-none rounded bg-white px-2 py-0.5 text-xs text-ink-900 shadow-sm transition-all hover:shadow active:cursor-grabbing ${
-        dimmed ? 'opacity-40' : ''
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect(id);
+      }}
+      className={`cursor-grab select-none rounded px-2 py-0.5 text-xs shadow-sm transition-all hover:shadow active:cursor-grabbing ${
+        selected
+          ? 'bg-brand-50 ring-2 ring-brand-500 font-semibold text-brand-700'
+          : 'bg-white text-ink-900'
       }`}
     >
       {name}
