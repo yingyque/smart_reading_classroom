@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   BookOpenText,
@@ -15,6 +15,7 @@ import {
   Container,
   Pause,
   Play,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -44,7 +45,10 @@ export default function TeacherDashboard() {
   const [active, setActive] = useState<Classroom | null>(null);
   const [documents, setDocuments] = useState<DocumentLite[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [unassigned, setUnassigned] = useState<{ id: string; name: string }[]>([]);
   const [groupCount, setGroupCount] = useState(4);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary | null>(null);
   const [newName, setNewName] = useState('');
   const [copied, setCopied] = useState(false);
@@ -78,6 +82,7 @@ export default function TeacherDashboard() {
     ]);
     setDocuments(docRes.data);
     setGroups(detailRes.data.groups || []);
+    setUnassigned(detailRes.data.unassigned || []);
     setGroupCount(c.groupCount || 4);
     setWorkspaces(wsRes?.data ?? null);
   };
@@ -157,13 +162,59 @@ export default function TeacherDashboard() {
     setGrouping(true);
     try {
       const res = await api.post(`/classrooms/${active.id}/group`, { groupCount });
-      setGroups(res.data);
+      setGroups(res.data.groups);
+      setUnassigned(res.data.unassigned);
     } catch (err: any) {
       console.error('分组失败', err);
       alert(err.response?.data?.error || '分组失败');
     } finally {
       setGrouping(false);
     }
+  };
+
+  const addGroup = async () => {
+    if (!active) return;
+    try {
+      const res = await api.post(`/classrooms/${active.id}/groups`);
+      setGroups(res.data.groups);
+      setUnassigned(res.data.unassigned);
+    } catch (err: any) {
+      console.error('添加分组失败', err);
+      alert(err.response?.data?.error || '添加分组失败');
+    }
+  };
+
+  const deleteGroup = async (groupId: string) => {
+    if (!active) return;
+    if (!confirm('删除该分组？组内成员将回到未分组。')) return;
+    try {
+      const res = await api.delete(`/classrooms/${active.id}/groups/${groupId}`);
+      setGroups(res.data.groups);
+      setUnassigned(res.data.unassigned);
+    } catch (err: any) {
+      console.error('删除分组失败', err);
+      alert(err.response?.data?.error || '删除分组失败');
+    }
+  };
+
+  // 拖拽落点：toGroupId 为 null 表示移回未分组池
+  const moveStudent = async (userId: string, toGroupId: string | null) => {
+    if (!active) return;
+    try {
+      const res = await api.post(`/classrooms/${active.id}/groups/move`, { userId, toGroupId });
+      setGroups(res.data.groups);
+      setUnassigned(res.data.unassigned);
+    } catch (err: any) {
+      console.error('调整分组失败', err);
+      alert(err.response?.data?.error || '调整分组失败');
+    }
+  };
+
+  const onDropTo = (e: DragEvent, target: string | null) => {
+    e.preventDefault();
+    setDropTarget(null);
+    const uid = e.dataTransfer.getData('text/plain');
+    if (uid) moveStudent(uid, target);
   };
 
   const copyCode = async () => {
@@ -334,12 +385,12 @@ export default function TeacherDashboard() {
                 </div>
               </section>
 
-              {/* 随机分组 */}
+              {/* 分组管理：随机分组 + 手动拖拽 */}
               <section className="rounded-2xl border border-ink-900/5 bg-white p-6 shadow-soft">
                 <h2 className="mb-4 flex items-center gap-2 font-semibold text-ink-900">
-                  <Users size={18} className="text-teal-500" /> 随机分组
+                  <Users size={18} className="text-teal-500" /> 分组管理
                 </h2>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <label className="text-sm text-ink-500">分组数量</label>
                   <input
                     type="number"
@@ -357,23 +408,87 @@ export default function TeacherDashboard() {
                     {grouping ? <Loader2 size={16} className="animate-spin" /> : <Shuffle size={16} />}
                     一键随机分组
                   </button>
-                  <span className="text-xs text-ink-500">系统会把已加入课堂的学生随机均衡分配到各组</span>
+                  <button
+                    onClick={addGroup}
+                    className="flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 font-semibold text-teal-700 transition-all hover:bg-teal-100 active:scale-95"
+                  >
+                    <Plus size={16} /> 添加分组
+                  </button>
+                  <span className="text-xs text-ink-500">随机分组会重新分配全部学生；也可直接拖拽学生卡片手动调整</span>
                 </div>
 
-                <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-3">
+                {/* 未分组学生池（可拖入下方任意组） */}
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDropTarget('pool');
+                  }}
+                  onDragLeave={() => setDropTarget((t) => (t === 'pool' ? null : t))}
+                  onDrop={(e) => onDropTo(e, null)}
+                  className={`mt-5 rounded-xl border-2 border-dashed p-4 transition-all ${
+                    dropTarget === 'pool' ? 'border-brand-500 bg-brand-50/50' : 'border-ink-900/10 bg-[#f7f8fa]'
+                  }`}
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-ink-900">未分组学生</span>
+                    <span className="text-xs text-ink-500">{unassigned.length} 人 · 可拖入下方任意分组</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {unassigned.map((s) => (
+                      <StudentChip
+                        key={s.id}
+                        id={s.id}
+                        name={s.name}
+                        dimmed={dragging === s.id}
+                        onDragStart={setDragging}
+                        onDragEnd={() => setDragging(null)}
+                      />
+                    ))}
+                    {!unassigned.length && <span className="text-xs text-ink-500">暂无未分组学生</span>}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-3">
                   {groups.map((g) => (
-                    <div key={g.id} className="rounded-xl border border-ink-900/5 bg-[#f7f8fa] p-4">
+                    <div
+                      key={g.id}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDropTarget(g.id);
+                      }}
+                      onDragLeave={() => setDropTarget((t) => (t === g.id ? null : t))}
+                      onDrop={(e) => onDropTo(e, g.id)}
+                      className={`rounded-xl border p-4 transition-all ${
+                        dropTarget === g.id
+                          ? 'border-brand-500 bg-brand-50/50 ring-2 ring-brand-500/20'
+                          : 'border-ink-900/5 bg-[#f7f8fa]'
+                      }`}
+                    >
                       <div className="mb-2 flex items-center justify-between">
                         <span className="font-semibold text-ink-900">{g.name}</span>
-                        <span className="text-xs text-ink-500">{g.members.length} 人</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-ink-500">{g.members.length} 人</span>
+                          <button
+                            onClick={() => deleteGroup(g.id)}
+                            title="删除分组"
+                            className="rounded p-1 text-ink-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {g.members.map((m) => (
-                          <span key={m.userId} className="rounded bg-white px-2 py-0.5 text-xs text-ink-900 shadow-sm">
-                            {m.user.name}
-                          </span>
+                          <StudentChip
+                            key={m.userId}
+                            id={m.userId}
+                            name={m.user.name}
+                            dimmed={dragging === m.userId}
+                            onDragStart={setDragging}
+                            onDragEnd={() => setDragging(null)}
+                          />
                         ))}
-                        {!g.members.length && <span className="text-xs text-ink-500">暂无成员</span>}
+                        {!g.members.length && <span className="text-xs text-ink-500">拖拽学生到此处</span>}
                       </div>
                     </div>
                   ))}
@@ -488,6 +603,38 @@ function StatusDot({ status }: { status: string }) {
     <span className="flex items-center gap-1.5" title={label}>
       <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
       <span className="text-xs text-ink-500">{label}</span>
+    </span>
+  );
+}
+
+// 可拖拽的学生卡片：dataTransfer 携带 userId，供组卡片/未分组池 onDrop 读取
+function StudentChip({
+  id,
+  name,
+  dimmed,
+  onDragStart,
+  onDragEnd,
+}: {
+  id: string;
+  name: string;
+  dimmed: boolean;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
+}) {
+  return (
+    <span
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', id);
+        e.dataTransfer.effectAllowed = 'move';
+        onDragStart(id);
+      }}
+      onDragEnd={onDragEnd}
+      className={`cursor-grab select-none rounded bg-white px-2 py-0.5 text-xs text-ink-900 shadow-sm transition-all hover:shadow active:cursor-grabbing ${
+        dimmed ? 'opacity-40' : ''
+      }`}
+    >
+      {name}
     </span>
   );
 }

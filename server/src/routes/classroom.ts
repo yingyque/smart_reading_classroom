@@ -13,6 +13,26 @@ function genCode(): string {
   return code;
 }
 
+// 汇总课堂分组状态：各组名单（按创建顺序）+ 已加入但未分组的学生（来自 Workspace）
+async function groupingState(classroomId: string) {
+  const [groups, workspaces] = await Promise.all([
+    prisma.group.findMany({
+      where: { classroomId },
+      orderBy: { createdAt: 'asc' },
+      include: { members: { include: { user: { select: { id: true, name: true } } } } },
+    }),
+    prisma.workspace.findMany({
+      where: { classroomId },
+      include: { user: { select: { id: true, name: true } } },
+    }),
+  ]);
+  const assigned = new Set(groups.flatMap((g) => g.members.map((m) => m.userId)));
+  const unassigned = workspaces
+    .filter((w) => !assigned.has(w.userId))
+    .map((w) => ({ id: w.user.id, name: w.user.name }));
+  return { groups, unassigned };
+}
+
 // 教师创建课堂
 router.post('/', authRequired, roleRequired('TEACHER'), async (req: AuthedRequest, res: Response) => {
   const { name } = req.body as { name?: string };
@@ -179,24 +199,84 @@ router.post('/:id/group', authRequired, roleRequired('TEACHER'), async (req: Aut
 
   await prisma.classroom.update({ where: { id: classroomId }, data: { groupCount: count } });
 
-  const result = await prisma.group.findMany({
-    where: { classroomId },
-    include: { members: { include: { user: { select: { id: true, name: true } } } } },
-  });
-  return res.json(result);
+  return res.json(await groupingState(classroomId));
 });
 
-// 课堂详情（含分组名单）—教师用
+// 教师手动添加一个空组（组名自动顺延编号）
+router.post('/:id/groups', authRequired, roleRequired('TEACHER'), async (req: AuthedRequest, res: Response) => {
+  const classroom = await prisma.classroom.findUnique({ where: { id: req.params.id } });
+  if (!classroom || classroom.teacherId !== req.user!.id) {
+    return res.status(403).json({ error: '无权操作此课堂' });
+  }
+  const groups = await prisma.group.findMany({ where: { classroomId: classroom.id } });
+  const maxNum = groups.reduce((max, g) => {
+    const m = g.name.match(/(\d+)\s*组/);
+    return m ? Math.max(max, Number(m[1])) : max;
+  }, 0);
+  await prisma.group.create({
+    data: { name: `第 ${maxNum + 1} 组`, classroomId: classroom.id },
+  });
+  return res.json(await groupingState(classroom.id));
+});
+
+// 教师删除一个组（组内成员回到未分组池）
+router.delete('/:id/groups/:groupId', authRequired, roleRequired('TEACHER'), async (req: AuthedRequest, res: Response) => {
+  const grp = await prisma.group.findUnique({ where: { id: req.params.groupId } });
+  const classroom = grp && await prisma.classroom.findUnique({ where: { id: grp.classroomId } });
+  if (!grp || !classroom || classroom.teacherId !== req.user!.id) {
+    return res.status(403).json({ error: '无权操作此课堂' });
+  }
+  await prisma.$transaction([
+    prisma.groupMember.deleteMany({ where: { groupId: grp.id } }),
+    prisma.group.delete({ where: { id: grp.id } }),
+  ]);
+  return res.json(await groupingState(grp.classroomId));
+});
+
+// 教师拖拽调整分组：把学生移到指定组（toGroupId 为 null 表示移回未分组池）
+router.post('/:id/groups/move', authRequired, roleRequired('TEACHER'), async (req: AuthedRequest, res: Response) => {
+  const classroomId = req.params.id;
+  const { userId, toGroupId } = req.body as { userId?: string; toGroupId?: string | null };
+  if (!userId) return res.status(400).json({ error: '缺少学生信息' });
+
+  const classroom = await prisma.classroom.findUnique({ where: { id: classroomId } });
+  if (!classroom || classroom.teacherId !== req.user!.id) {
+    return res.status(403).json({ error: '无权操作此课堂' });
+  }
+  // 目标组必须属于本课堂
+  if (toGroupId) {
+    const target = await prisma.group.findUnique({ where: { id: toGroupId } });
+    if (!target || target.classroomId !== classroomId) {
+      return res.status(400).json({ error: '目标分组不存在' });
+    }
+  }
+  // 学生必须已加入本课堂（有工作台容器或已在某组）
+  const [ws, member] = await Promise.all([
+    prisma.workspace.findFirst({ where: { classroomId, userId } }),
+    prisma.groupMember.findFirst({ where: { userId, group: { classroomId } } }),
+  ]);
+  if (!ws && !member) return res.status(400).json({ error: '该学生未加入本课堂' });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.groupMember.deleteMany({ where: { userId, group: { classroomId } } });
+    if (toGroupId) {
+      await tx.groupMember.create({ data: { groupId: toGroupId, userId } });
+    }
+  });
+  return res.json(await groupingState(classroomId));
+});
+
+// 课堂详情（含分组名单与未分组学生）—教师用
 router.get('/:id', authRequired, async (req: AuthedRequest, res: Response) => {
   const classroom = await prisma.classroom.findUnique({
     where: { id: req.params.id },
     include: {
-      groups: { include: { members: { include: { user: { select: { id: true, name: true } } } } } },
       documents: { select: { id: true, title: true, fileType: true, createdAt: true } },
     },
   });
   if (!classroom) return res.status(404).json({ error: '课堂不存在' });
-  return res.json(classroom);
+  const { groups, unassigned } = await groupingState(classroom.id);
+  return res.json({ ...classroom, groups, unassigned });
 });
 
 // 学生查询自己在某课堂的小组
