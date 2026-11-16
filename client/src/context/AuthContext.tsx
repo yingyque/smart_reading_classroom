@@ -7,6 +7,7 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   setAuth: (token: string, user: User) => void;
+  updateUser: (patch: Partial<User>) => void;
   logout: () => void;
 }
 
@@ -14,6 +15,7 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   loading: true,
   setAuth: () => {},
+  updateUser: () => {},
   logout: () => {},
 });
 
@@ -39,6 +41,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(u);
   };
 
+  const updateUser = (patch: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
     disconnectSocket();
@@ -47,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, setAuth, logout }}>
+    <AuthContext.Provider value={{ user, loading, setAuth, updateUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

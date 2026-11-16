@@ -76,4 +76,18 @@ router.get('/me', authRequired, async (req: AuthedRequest, res: Response) => {
   return res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
 });
 
+// 修改个人信息（目前支持改名）
+router.patch('/profile', authRequired, async (req: AuthedRequest, res: Response) => {
+  const { name } = req.body as { name?: string };
+  const trimmed = (name || '').trim();
+  if (!trimmed) return res.status(400).json({ error: '姓名不能为空' });
+  if (trimmed.length > 30) return res.status(400).json({ error: '姓名不能超过 30 个字符' });
+
+  const user = await prisma.user.update({
+    where: { id: req.user!.id },
+    data: { name: trimmed },
+  });
+  return res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
+});
+
 export default router;

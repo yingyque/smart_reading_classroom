@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, BookOpenText, ChevronDown, Loader2 } from 'lucide-react';
+import { ArrowLeft, BookOpenText, ChevronDown, Loader2, Settings } from 'lucide-react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../context/AuthContext';
 import { DocumentLite, Group } from '../types';
 import DocumentViewer from '../components/DocumentViewer';
 import DiscussionPanel from '../components/DiscussionPanel';
+import SettingsModal from '../components/SettingsModal';
 
 export default function ReadingRoom() {
   const { classroomId } = useParams();
@@ -16,6 +17,7 @@ export default function ReadingRoom() {
   const [documents, setDocuments] = useState<DocumentLite[]>([]);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [docMenuOpen, setDocMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const socket = useMemo(() => getSocket(), []);
 
@@ -66,6 +68,13 @@ export default function ReadingRoom() {
           <div className="flex items-center gap-2 font-bold text-ink-900">
             <BookOpenText size={18} className="text-brand-500" />
             智慧阅读
+            <button
+              onClick={() => setSettingsOpen(true)}
+              title="设置"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-500 transition-colors hover:bg-ink-900/5 hover:text-ink-900"
+            >
+              <Settings size={17} />
+            </button>
           </div>
           {/* 文献切换 */}
           <div className="relative ml-4">
@@ -123,6 +132,7 @@ export default function ReadingRoom() {
           )}
         </aside>
       </div>
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

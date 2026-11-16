@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpenText, LogOut, ArrowRight, Loader2, Hash } from 'lucide-react';
+import { BookOpenText, LogOut, ArrowRight, Loader2, Hash, Settings } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import SettingsModal from '../components/SettingsModal';
 
 interface JoinedClass {
   id: string;
@@ -19,6 +20,7 @@ export default function StudentHome() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 从服务端拉取当前账号已加入的课堂（不依赖 localStorage，换账号不会串课堂）
   const loadClassrooms = async () => {
@@ -64,7 +66,8 @@ export default function StudentHome() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 via-white to-[#eef2f7]">
-      <Nav name={user?.name} onLogout={logout} />
+      <Nav name={user?.name} onLogout={logout} onOpenSettings={() => setSettingsOpen(true)} />
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <main className="mx-auto max-w-4xl px-4 pt-24">
         <h1 className="text-2xl font-bold text-ink-900">欢迎回来，{user?.name}</h1>
         <p className="mt-1 text-ink-500">输入教师提供的课堂码，加入课堂并进入沉浸式阅读讨论。</p>
@@ -166,7 +169,7 @@ export default function StudentHome() {
   );
 }
 
-function Nav({ name, onLogout }: { name?: string; onLogout: () => void }) {
+function Nav({ name, onLogout, onOpenSettings }: { name?: string; onLogout: () => void; onOpenSettings: () => void }) {
   return (
     <nav className="fixed inset-x-0 top-0 z-40 flex h-16 items-center justify-between border-b border-white/60 bg-white/70 px-6 backdrop-blur-md">
       <div className="flex items-center gap-2 font-bold text-ink-900">
@@ -174,6 +177,13 @@ function Nav({ name, onLogout }: { name?: string; onLogout: () => void }) {
           <BookOpenText size={18} />
         </div>
         智慧阅读
+        <button
+          onClick={onOpenSettings}
+          title="设置"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-500 transition-colors hover:bg-ink-900/5 hover:text-ink-900"
+        >
+          <Settings size={17} />
+        </button>
       </div>
       <div className="flex items-center gap-4">
         <span className="text-sm text-ink-500">{name} · 学生</span>
