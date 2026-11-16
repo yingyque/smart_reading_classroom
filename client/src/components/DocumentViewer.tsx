@@ -638,10 +638,15 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPa
 
   return (
     <div className="relative">
-      {/* 查找 + 渲染进度（sticky） */}
-      <div className="sticky top-0 z-20 flex items-center gap-2 bg-white/95 px-3 py-2 backdrop-blur">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-ink-900/10 px-2 py-1 focus-within:border-brand-500">
-          <Search size={14} className="shrink-0 text-ink-400" />
+      {/* 渲染进度 + 紧凑查找（放大镜图标 + 小输入框，放在已渲染旁边） */}
+      <div className="sticky top-0 z-20 flex items-center justify-end gap-2 bg-white/95 px-3 py-1.5 backdrop-blur">
+        {progress && progress.done < progress.total && (
+          <span className="shrink-0 whitespace-nowrap text-xs text-ink-500">
+            已渲染 {progress.done}/{progress.total} 页
+          </span>
+        )}
+        <div className="flex w-40 items-center gap-1 rounded-full border border-ink-900/10 px-2 py-1 focus-within:border-brand-500">
+          <Search size={13} className="shrink-0 text-ink-400" />
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
@@ -652,12 +657,12 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPa
               }
               if (e.key === 'Escape') clearSearch();
             }}
-            placeholder="查找文字…"
-            className="min-w-0 flex-1 bg-transparent text-sm text-ink-900 outline-none placeholder:text-ink-500/50"
+            placeholder="查找文字"
+            className="min-w-0 flex-1 bg-transparent text-xs text-ink-900 outline-none placeholder:text-ink-500/50"
           />
           {searchInput && (
             <button onClick={clearSearch} className="shrink-0 rounded p-0.5 text-ink-400 hover:text-ink-900">
-              <X size={13} />
+              <X size={12} />
             </button>
           )}
         </div>
@@ -684,11 +689,6 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPa
             </button>
           </>
         ) : null}
-        {progress && progress.done < progress.total && (
-          <span className="shrink-0 whitespace-nowrap text-xs text-ink-500">
-            已渲染 {progress.done}/{progress.total} 页
-          </span>
-        )}
       </div>
 
       {/* 页面容器（1350 = 900×1.5，PDF 放大 1.5 倍；窄屏自动填满可用宽度） */}
