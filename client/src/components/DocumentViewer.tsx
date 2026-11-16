@@ -301,7 +301,8 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPa
         const cls = HL_COLOR_CLASS[hl.color || 'yellow'] ?? HL_COLOR_CLASS.yellow;
         for (const r of rects) {
           const div = document.createElement('div');
-          div.className = cls;
+          // 定位规则（absolute/pointer-events/mix-blend-mode）在 .pdf-highlight-rect，颜色类只管背景色
+          div.className = `pdf-highlight-rect ${cls}`;
           div.style.left = `${r.x * 100}%`;
           div.style.top = `${r.y * 100}%`;
           div.style.width = `${r.w * 100}%`;
