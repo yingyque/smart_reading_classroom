@@ -46,7 +46,14 @@ router.get('/joined', authRequired, async (req: AuthedRequest, res: Response) =>
   const [memberships, workspaces] = await Promise.all([
     prisma.groupMember.findMany({
       where: { userId: req.user!.id },
-      include: { group: { include: { classroom: { select: { id: true, name: true } } } } },
+      include: {
+        group: {
+          include: {
+            classroom: { select: { id: true, name: true } },
+            members: { include: { user: { select: { id: true, name: true } } } },
+          },
+        },
+      },
     }),
     prisma.workspace.findMany({
       where: { userId: req.user!.id },
@@ -54,18 +61,19 @@ router.get('/joined', authRequired, async (req: AuthedRequest, res: Response) =>
     }),
   ]);
 
-  const map = new Map<string, { id: string; name: string; groupName: string | null }>();
+  const map = new Map<string, { id: string; name: string; groupName: string | null; members: { id: string; name: string }[] }>();
   for (const m of memberships) {
     map.set(m.group.classroom.id, {
       id: m.group.classroom.id,
       name: m.group.classroom.name,
       groupName: m.group.name,
+      members: m.group.members.map((mem) => ({ id: mem.user.id, name: mem.user.name })),
     });
   }
   // 教师首次分组前加入的学生只有 Workspace 记录，需补齐
   for (const w of workspaces) {
     if (!map.has(w.classroom.id)) {
-      map.set(w.classroom.id, { id: w.classroom.id, name: w.classroom.name, groupName: null });
+      map.set(w.classroom.id, { id: w.classroom.id, name: w.classroom.name, groupName: null, members: [] });
     }
   }
   return res.json(Array.from(map.values()));

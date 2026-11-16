@@ -8,6 +8,7 @@ interface JoinedClass {
   id: string;
   name: string;
   groupName: string | null;
+  members: { id: string; name: string }[];
 }
 
 export default function StudentHome() {
@@ -125,12 +126,30 @@ export default function StudentHome() {
               </div>
 
               {c.groupName ? (
-                <button
-                  onClick={() => navigate(`/reading/${c.id}`)}
-                  className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-violet-500 py-3 font-semibold text-white shadow-glass transition-all hover:shadow-lg active:scale-[0.98]"
-                >
-                  <BookOpenText size={18} /> 进入阅读讨论室
-                </button>
+                <>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-ink-500">同组成员：</span>
+                    {c.members.map((m) => (
+                      <span
+                        key={m.id}
+                        className={`rounded-full px-2.5 py-0.5 text-sm ${
+                          m.id === user?.id
+                            ? 'bg-brand-500/10 font-semibold text-brand-600'
+                            : 'bg-ink-900/5 text-ink-700'
+                        }`}
+                      >
+                        {m.name}
+                        {m.id === user?.id ? '（我）' : ''}
+                      </span>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => navigate(`/reading/${c.id}`)}
+                    className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-violet-500 py-3 font-semibold text-white shadow-glass transition-all hover:shadow-lg active:scale-[0.98]"
+                  >
+                    <BookOpenText size={18} /> 进入阅读讨论室
+                  </button>
+                </>
               ) : (
                 <p className="mt-4 text-sm text-ink-500">教师尚未分组，分组后即可进入阅读讨论室。</p>
               )}
