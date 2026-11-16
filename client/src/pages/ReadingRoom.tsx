@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, BookOpenText, ChevronDown, Loader2, Settings } from 'lucide-react';
+import { ArrowLeft, BookOpenText, ChevronDown, Loader2, Settings, Users, Bot, NotebookPen } from 'lucide-react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../context/AuthContext';
 import { DocumentLite, Group } from '../types';
 import DocumentViewer from '../components/DocumentViewer';
 import DiscussionPanel from '../components/DiscussionPanel';
+import NotePanel from '../components/NotePanel';
 import SettingsModal from '../components/SettingsModal';
+import { cn } from '../lib/cn';
 
 export default function ReadingRoom() {
   const { classroomId } = useParams();
@@ -18,6 +20,11 @@ export default function ReadingRoom() {
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [docMenuOpen, setDocMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 右侧面板：小组讨论 / AI 讨论 / 学习笔记
+  const [asideTab, setAsideTab] = useState<'peer' | 'ai' | 'note'>('peer');
+  // 笔记版本号：阅读器新增高亮 / 笔记面板增删改后递增，双方向刷新
+  const [noteTick, setNoteTick] = useState(0);
+  const bumpNotes = () => setNoteTick((t) => t + 1);
   const [loading, setLoading] = useState(true);
   const socket = useMemo(() => getSocket(), []);
 
@@ -118,18 +125,70 @@ export default function ReadingRoom() {
       {/* 左读右聊 */}
       <div className="flex flex-1 overflow-hidden">
         <section className="flex-1 overflow-hidden border-r border-ink-900/5 bg-white md:w-[60%]">
-          <DocumentViewer docId={activeDocId} />
-        </section>
-        <aside className="w-full md:w-[40%] md:min-w-[380px] md:max-w-[520px]">
-          {user && classroomId && (
-            <DiscussionPanel
-              socket={socket}
+          {classroomId && (
+            <DocumentViewer
+              docId={activeDocId}
               classroomId={classroomId}
-              groupId={group.id}
-              documentId={activeDocId}
-              me={user}
+              notesVersion={noteTick}
+              onNotesChanged={bumpNotes}
             />
           )}
+        </section>
+        <aside className="flex w-full flex-col md:w-[40%] md:min-w-[380px] md:max-w-[520px]">
+          {/* 面板切换：小组讨论 / AI 讨论 / 学习笔记 */}
+          <div className="flex shrink-0 border-b border-ink-900/5 bg-white px-2 pt-2">
+            <button
+              onClick={() => setAsideTab('peer')}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-1.5 rounded-t-lg px-3 py-2 text-sm font-semibold transition-all',
+                asideTab === 'peer' ? 'bg-brand-50 text-brand-600' : 'text-ink-500 hover:bg-ink-900/5',
+              )}
+            >
+              <Users size={16} /> 小组讨论
+            </button>
+            <button
+              onClick={() => setAsideTab('ai')}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-1.5 rounded-t-lg px-3 py-2 text-sm font-semibold transition-all',
+                asideTab === 'ai' ? 'bg-violet-500/10 text-violet-500' : 'text-ink-500 hover:bg-ink-900/5',
+              )}
+            >
+              <Bot size={16} /> AI 讨论
+            </button>
+            <button
+              onClick={() => setAsideTab('note')}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-1.5 rounded-t-lg px-3 py-2 text-sm font-semibold transition-all',
+                asideTab === 'note' ? 'bg-amber-50 text-amber-600' : 'text-ink-500 hover:bg-ink-900/5',
+              )}
+            >
+              <NotebookPen size={16} /> 学习笔记
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">
+            {asideTab === 'note' ? (
+              classroomId && (
+                <NotePanel
+                  classroomId={classroomId}
+                  documentId={activeDocId}
+                  documents={documents}
+                  refreshKey={noteTick}
+                  onNotesChanged={bumpNotes}
+                />
+              )
+            ) : (
+              user && classroomId && (
+                <DiscussionPanel
+                  socket={socket}
+                  classroomId={classroomId}
+                  groupId={group.id}
+                  documentId={activeDocId}
+                  me={user}
+                  tab={asideTab === 'ai' ? 'AI' : 'PEER'}
+                />
+              )
+            )}
+          </div>
         </aside>
       </div>
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}

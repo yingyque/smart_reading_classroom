@@ -30,6 +30,7 @@ model User {
   messages         Message[]
   aiUsages         AiUsage[]
   workspaces       Workspace[]
+  notes            Note[]
 }
 
 model Classroom {
@@ -45,6 +46,7 @@ model Classroom {
   documents Document[]
   messages  Message[]
   workspaces Workspace[]
+  notes     Note[]
 }
 
 model Group {
@@ -83,6 +85,7 @@ model Document {
 
   classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
   messages  Message[]
+  notes     Note[]
 }
 
 model Message {
@@ -104,6 +107,29 @@ model Message {
   @@index([classroomId])
   @@index([groupId])
   @@index([type])
+}
+
+// 学生学习笔记：仅本人与课堂教师可见（应用层按 userId/teacherId 过滤）
+model Note {
+  id          String   @id @default(cuid())
+  classroomId String
+  userId      String // 笔记作者（学生本人）
+  documentId  String? // 写笔记时正在阅读的文献；文献被删后置空（笔记保留）
+  content     String   @db.Text
+  kind        String   @default("text") // text=普通笔记 | highlight=文献高亮
+  quote       String?  @db.Text // 高亮模式下选中的原文
+  page        Int? // 高亮所在页码（1 起）
+  rects       String?  @db.Text // 高亮选区矩形 JSON：[{x,y,w,h}]，归一化 0~1（相对页面）
+  color       String? // 高亮颜色：blue | green | yellow
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document  Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([classroomId, userId])
+  @@index([classroomId, updatedAt])
 }
 
 model AiUsage {

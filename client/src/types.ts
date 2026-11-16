@@ -55,6 +55,27 @@ export interface DocumentDetail extends DocumentLite {
   content: string;
 }
 
+// 学生学习笔记（学生端本人视角）
+export interface NoteItem {
+  id: string;
+  documentId: string | null;
+  documentTitle: string | null;
+  content: string;
+  kind?: 'text' | 'highlight';
+  quote?: string | null;
+  page?: number | null;
+  rects?: string | null;
+  color?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// 教师端查看的学生笔记（分析看板用）
+export interface NoteLogItem extends NoteItem {
+  userId: string;
+  studentName: string;
+}
+
 export interface WordCloudItem {
   text: string;
   value: number;

@@ -12,10 +12,11 @@ interface Props {
   groupId: string;
   documentId: string | null;
   me: User;
+  /** 当前展示的消息类型，由 ReadingRoom 顶部三标签控制 */
+  tab: MessageType;
 }
 
-export default function DiscussionPanel({ socket, classroomId, groupId, documentId, me }: Props) {
-  const [tab, setTab] = useState<MessageType>('PEER');
+export default function DiscussionPanel({ socket, classroomId, groupId, documentId, me, tab }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [aiTyping, setAiTyping] = useState(false);
@@ -86,12 +87,6 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
 
   return (
     <div className="flex h-full flex-col bg-white">
-      {/* 标签 */}
-      <div className="flex border-b border-ink-900/5 p-2">
-        <TabButton active={tab === 'PEER'} onClick={() => setTab('PEER')} icon={<Users size={16} />} label="小组讨论" color="brand" />
-        <TabButton active={tab === 'AI'} onClick={() => setTab('AI')} icon={<Bot size={16} />} label="AI 讨论" color="violet" />
-      </div>
-
       {/* 消息流 */}
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-auto p-4">
         {loading ? (
@@ -164,37 +159,6 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
         </div>
       </div>
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  icon,
-  label,
-  color,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  color: 'brand' | 'violet';
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition-all',
-        active
-          ? color === 'brand'
-            ? 'bg-brand-50 text-brand-600'
-            : 'bg-violet-500/10 text-violet-500'
-          : 'text-ink-500 hover:bg-ink-900/5',
-      )}
-    >
-      {icon}
-      {label}
-    </button>
   );
 }
 

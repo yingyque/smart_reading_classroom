@@ -18,11 +18,12 @@ import {
   Download,
   X,
   FileText,
+  NotebookPen,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../context/AuthContext';
-import { AnalyticsResult, InteractionLogItem, QuestionLogItem } from '../types';
+import { AnalyticsResult, InteractionLogItem, QuestionLogItem, NoteLogItem } from '../types';
 import WordCloudPanel from '../components/charts/WordCloudPanel';
 import ActivityTimeline from '../components/charts/ActivityTimeline';
 import GroupCompare from '../components/charts/GroupCompare';
@@ -70,18 +71,38 @@ export default function Analytics() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [data, setData] = useState<AnalyticsResult | null>(null);
+  const [notes, setNotes] = useState<NoteLogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   // 当前在弹窗中查看详情的提问记录
   const [selectedQuestion, setSelectedQuestion] = useState<QuestionLogItem | null>(null);
+  // 当前在弹窗中查看笔记的学生
+  const [selectedNoteStudent, setSelectedNoteStudent] = useState<{ userId: string; name: string } | null>(null);
   const socket = useMemo(() => getSocket(), []);
+
+  // 学生笔记汇总：按学生聚合（笔记数 / 最近更新）
+  const noteSummary = useMemo(() => {
+    const map = new Map<string, { userId: string; studentName: string; count: number; last: string }>();
+    for (const n of notes) {
+      const cur = map.get(n.userId) ?? { userId: n.userId, studentName: n.studentName, count: 0, last: n.updatedAt };
+      cur.count += 1;
+      if (n.updatedAt > cur.last) cur.last = n.updatedAt;
+      map.set(n.userId, cur);
+    }
+    return [...map.values()].sort((a, b) => b.count - a.count);
+  }, [notes]);
 
   const load = async (silent = false) => {
     if (!classroomId) return;
     if (silent) setRefreshing(true);
     try {
-      const res = await api.get(`/analytics/${classroomId}`);
+      const [res, notesRes] = await Promise.all([
+        api.get(`/analytics/${classroomId}`),
+        // 学生学习笔记（仅教师可见，独立于 analytics 主接口）
+        api.get(`/notes/${classroomId}`).catch(() => ({ data: [] })),
+      ]);
       setData(res.data);
+      setNotes(notesRes.data);
     } catch (err) {
       console.error('加载看板失败', err);
     } finally {
@@ -117,13 +138,16 @@ export default function Analytics() {
 
   // Esc 关闭问答详情弹窗
   useEffect(() => {
-    if (!selectedQuestion) return;
+    if (!selectedQuestion && !selectedNoteStudent) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelectedQuestion(null);
+      if (e.key === 'Escape') {
+        setSelectedQuestion(null);
+        setSelectedNoteStudent(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedQuestion]);
+  }, [selectedQuestion, selectedNoteStudent]);
 
   if (loading) {
     return (
@@ -255,6 +279,54 @@ export default function Analytics() {
             </div>
           </ChartCard>
 
+          {/* 学生学习笔记 */}
+          <ChartCard
+            title={`学生学习笔记（${notes.length} 条）`}
+            icon={<NotebookPen size={16} />}
+            className="lg:col-span-2"
+          >
+            <p className="mb-2 text-xs text-ink-500">仅学生本人和老师可见；点击学生行查看该生的全部笔记</p>
+            <div className="max-h-80 overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white text-left text-xs text-ink-500">
+                  <tr className="border-b border-ink-900/5">
+                    <th className="px-3 py-2 font-medium">学生</th>
+                    <th className="px-3 py-2 font-medium text-right">笔记数</th>
+                    <th className="px-3 py-2 font-medium">最近更新</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {noteSummary.map((s) => (
+                    <tr
+                      key={s.userId}
+                      onClick={() => setSelectedNoteStudent({ userId: s.userId, name: s.studentName })}
+                      title="点击查看该生全部笔记"
+                      className="cursor-pointer border-b border-ink-900/5 last:border-0 hover:bg-amber-500/[0.04]"
+                    >
+                      <td className="whitespace-nowrap px-3 py-2 font-medium text-ink-900">{s.studentName}</td>
+                      <td className="px-3 py-2 text-right text-amber-600">{s.count}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-ink-500">
+                        {new Date(s.last).toLocaleString('zh-CN', {
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
+                    </tr>
+                  ))}
+                  {!noteSummary.length && (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-8 text-center text-ink-500">
+                        暂无学生笔记
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </ChartCard>
+
           {/* 小组互动记录 */}
           <ChartCard
             title={`小组互动记录（${data?.interactions.length ?? 0} 条）`}
@@ -363,6 +435,95 @@ export default function Analytics() {
 
       {/* 问答详情弹窗：完整提问 + AI 回答 */}
       {selectedQuestion && <QuestionDetailModal question={selectedQuestion} onClose={() => setSelectedQuestion(null)} />}
+
+      {/* 学生笔记弹窗：该生的全部笔记时间线 */}
+      {selectedNoteStudent && (
+        <StudentNotesModal
+          studentName={selectedNoteStudent.name}
+          notes={notes.filter((n) => n.userId === selectedNoteStudent.userId)}
+          onClose={() => setSelectedNoteStudent(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// 学生笔记弹窗：该生的全部笔记时间线（点击遮罩或按 Esc 关闭）
+function StudentNotesModal({
+  studentName,
+  notes,
+  onClose,
+}: {
+  studentName: string;
+  notes: NoteLogItem[];
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 头部：学生信息 + 关闭按钮 */}
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 font-semibold text-ink-900">
+              <NotebookPen size={16} className="text-amber-500" />
+              {studentName} 的学习笔记
+            </div>
+            <div className="mt-0.5 text-xs text-ink-500">共 {notes.length} 条</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-500 hover:bg-ink-900/5"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {notes.map((n) => (
+            <div key={n.id} className="rounded-xl border border-ink-900/5 bg-[#f7f8fa] px-4 py-3">
+              <div className="mb-1.5 flex items-center gap-2 text-xs text-ink-500">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <FileText size={12} className="shrink-0 text-brand-500" />
+                  <span className="truncate">{n.documentTitle ?? '未关联文献'}</span>
+                </span>
+                <span className="shrink-0">
+                  {new Date(n.updatedAt).toLocaleString('zh-CN', { hour12: false })}
+                  {n.updatedAt !== n.createdAt && <span className="ml-1 italic">已编辑</span>}
+                </span>
+              </div>
+              {n.kind === 'highlight' && (
+                <blockquote
+                  className={`mb-1.5 rounded-r-lg border-l-4 px-2.5 py-1.5 text-sm leading-relaxed ${
+                    n.color === 'blue'
+                      ? 'border-blue-400 bg-blue-50 text-blue-900'
+                      : n.color === 'green'
+                        ? 'border-emerald-400 bg-emerald-50 text-emerald-900'
+                        : 'border-amber-400 bg-amber-50 text-amber-900'
+                  }`}
+                >
+                  {n.quote}
+                  {n.page != null && (
+                    <span className="ml-1.5 whitespace-nowrap text-[11px] font-normal opacity-70">
+                      （第 {n.page} 页）
+                    </span>
+                  )}
+                </blockquote>
+              )}
+              {n.content ? (
+                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-900">{n.content}</p>
+              ) : n.kind === 'highlight' ? (
+                <p className="text-xs italic text-ink-400">（未补充评论）</p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

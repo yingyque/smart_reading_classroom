@@ -8,6 +8,7 @@ import classroomRoutes from './routes/classroom';
 import documentRoutes from './routes/documents';
 import analyticsRoutes from './routes/analytics';
 import workspaceRoutes from './routes/workspaces';
+import noteRoutes from './routes/notes';
 import adminRoutes from './routes/admin';
 import { registerChatHandlers } from './sockets/chat';
 import { initSharedKeyPool, pickSharedKey } from './services/sharedKeyService';
@@ -39,6 +40,7 @@ app.use('/api/classrooms', classroomRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/workspaces', workspaceRoutes);
+app.use('/api/notes', noteRoutes);
 app.use('/api/shimin', adminRoutes);
 
 // 统一错误处理（含 multer 错误）
