@@ -29,6 +29,8 @@ services:
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-}
+      # 视觉模型：学生发图时 server 端先用它把图片转成文字描述
+      AI_VISION_MODEL: ${AI_VISION_MODEL:-minimax-m3}
       AI_CONTEXT_CHAR_LIMIT: ${AI_CONTEXT_CHAR_LIMIT:-6000}
       AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-60000}
       # 学生工作台容器模型（独立于服务端 AI_MODEL）。共享 Key 仅以加密形式存于数据库，不进环境变量

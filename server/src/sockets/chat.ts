@@ -1,11 +1,8 @@
 import { Server, Socket } from 'socket.io';
-import path from 'path';
 import { prisma } from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
-import { AiContextMessage, buildSystemPrompt } from '../services/aiService';
+import { AiContextMessage, buildSystemPrompt, describeChatImage } from '../services/aiService';
 import {
-  copyToWorkspace,
-  ensureWorkspace,
   runCodeBuddy,
   WorkspacePausedError,
 } from '../services/containerService';
@@ -230,22 +227,15 @@ export function registerChatHandlers(io: Server): void {
       for (const m of recentMessages) {
         promptParts.push(m.role === 'assistant' ? `[AI]：${m.content}` : `[学生]：${m.content}`);
       }
-      // 随消息带图时：把图片 docker cp 进学生容器，让 AI 用 Read 工具看图后讨论
+      // 随消息带图时：server 端先用视觉模型把图片转成文字描述，再写进 prompt。
+      // 不再走「docker cp 进容器 + Read 工具看图」：上游网关拒绝 tool 结果里的
+      // 图片块（400 messages[3].content[0].type），该路径对所有模型都不可用。
       let imageNote = '';
       if (imagePath) {
-        try {
-          const ws = await ensureWorkspace(group.classroomId, user.id);
-          const dest = `/tmp/${imagePath}`;
-          await copyToWorkspace(
-            ws.containerName,
-            path.join(config.uploadDir, 'chat', imagePath),
-            dest,
-          );
-          imageNote = `\n（学生随消息发送了一张图片，已存放在容器内 ${dest}，请先用 Read 工具查看该图片，再结合图片内容回复。）`;
-        } catch (err) {
-          console.error('[socket] 图片复制进工作台容器失败:', (err as Error).message);
-          imageNote = '\n（学生随消息发送了一张图片，但图片传递失败，请告知学生稍后重试。）';
-        }
+        const desc = await describeChatImage(imagePath);
+        imageNote = desc
+          ? `\n（学生随消息发送了一张图片，图片内容描述如下：\n${desc}\n请结合图片内容与学生的问题进行讨论。）`
+          : '\n（学生随消息发送了一张图片，但图片内容暂时无法识别，请告知学生稍后重试。）';
       }
       promptParts.push(`[学生]：${content}${imageNote}\n\n请以 AI 讨论助手的身份直接回复上述最新问题。`);
       const prompt = promptParts.join('\n');

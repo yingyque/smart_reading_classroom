@@ -1,4 +1,6 @@
 import OpenAI from 'openai';
+import fs from 'fs';
+import path from 'path';
 import { config, isAiConfigured } from '../config/env';
 
 const client = isAiConfigured()
@@ -75,4 +77,57 @@ export function buildSystemPrompt(title: string | undefined, docSnippet: string)
     + '回复使用纯文字 Markdown（标题、段落、列表、代码块 ASCII 示意图均可），但不要生成或插入任何图片。';
   if (!docSnippet) return base;
   return `${base}\n\n当前文献标题：《${title ?? '未命名'}》\n文献内容节选（可能被截断）：\n"""\n${docSnippet}\n"""`;
+}
+
+// 聊天图片扩展名 → data URL mime（与 routes/chat.ts 的上传白名单一致）
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+};
+
+// 用视觉模型把学生发送的聊天图片转成文字描述。
+// 讨论走 CodeBuddy 容器，但上游网关拒绝 tool 结果里的图片块（400），
+// 且讨论模型本身多不支持视觉，故图片由 server 端直接识别后以文字进入 prompt。
+// 成功返回描述文本；失败（未配置 / 读文件 / 接口错误）返回 null，由调用方降级提示。
+export async function describeChatImage(fileName: string): Promise<string | null> {
+  if (!client) return null;
+  const mime = IMAGE_MIME[path.extname(fileName).toLowerCase()];
+  if (!mime) return null;
+
+  let b64: string;
+  try {
+    b64 = fs.readFileSync(path.join(config.uploadDir, 'chat', fileName)).toString('base64');
+  } catch (err) {
+    console.error('[aiService] 读取聊天图片失败:', (err as Error).message);
+    return null;
+  }
+
+  try {
+    const completion = await client.chat.completions.create(
+      {
+        model: config.ai.visionModel,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
+              {
+                type: 'text',
+                text: '请用中文详细描述这张图片的内容：包括图片类型（照片/截图/图表/文档扫描等）、主体内容、可见的文字要点、颜色与布局等关键信息，供后续讨论使用。直接输出描述，不要寒暄。',
+              },
+            ],
+          },
+        ],
+      },
+      // 大图识别较慢，单独放宽本次请求的超时（不影响 client 全局默认值）
+      { timeout: 120000 },
+    );
+    const desc = completion.choices[0]?.message?.content?.trim();
+    return desc || null;
+  } catch (err) {
+    console.error('[aiService] 图片识别失败:', (err as Error).message);
+    return null;
+  }
 }

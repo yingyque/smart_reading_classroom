@@ -375,16 +375,6 @@ function parseCodeBuddyJson(out: string): {
   return { text, usage, isError: result?.is_error === true, errorText };
 }
 
-// 把 server 容器内的文件复制进学生工作台容器（docker cp；聊天图片给 AI 看图用）
-// docker CLI 在 server 容器内执行，srcPath 按 server 容器文件系统解析（uploads 卷挂载在 /app/uploads）
-export async function copyToWorkspace(
-  containerName: string,
-  srcPath: string,
-  destPath: string,
-): Promise<void> {
-  await docker(['cp', srcPath, `${containerName}:${destPath}`], 30000);
-}
-
 // 教师控制：暂停某个学生的容器（容器保留，可随时开启）
 export async function pauseWorkspace(workspaceId: string): Promise<void> {
   const ws = await prisma.workspace.findUnique({ where: { id: workspaceId } });

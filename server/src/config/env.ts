@@ -30,6 +30,11 @@ export const config = {
     baseURL: process.env.AI_BASE_URL ?? '',
     apiKey: process.env.AI_API_KEY ?? '',
     model: process.env.AI_MODEL ?? 'gpt-3.5-turbo',
+    // 视觉模型：AI 讨论中学生发图时，server 端先用它把图片转成文字描述。
+    // 讨论模型（AI_MODEL / WORKSPACE_AI_MODEL）通常不支持视觉，且上游网关
+    // 拒绝 tool 结果里携带图片块（400 messages[n].content[0].type），图片
+    // 只能以 image_url 形式放在普通用户消息里交给视觉模型识别。
+    visionModel: process.env.AI_VISION_MODEL ?? 'minimax-m3',
     contextCharLimit: Number(process.env.AI_CONTEXT_CHAR_LIMIT ?? 6000),
     timeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 60000),
   },
