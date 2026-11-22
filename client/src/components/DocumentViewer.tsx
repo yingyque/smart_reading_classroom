@@ -579,14 +579,32 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
         setSelPopup(null);
         return;
       }
-      const quote = sel.toString().replace(/\s+/g, ' ').trim();
+      // 跨页选区修复：引用文字若取整个选区会包含后面页的内容，而高亮矩形只落在起始页，
+      // 导致笔记文字与高亮区域不对应。这里把选区收敛到起始页末尾（Range 边界按文档序，
+      // 无论拖选方向，起始页永远是 range 的 start 一侧），保证两者一致。
+      let effectiveRange = range;
+      const endEl =
+        range.endContainer.nodeType === Node.TEXT_NODE
+          ? range.endContainer.parentElement
+          : (range.endContainer as HTMLElement);
+      const endHolder = endEl?.closest('[data-page-idx]') as HTMLDivElement | null;
+      if (endHolder && endHolder !== holder) {
+        const lastText = lastTextNodeIn(holder);
+        if (!lastText) {
+          setSelPopup(null);
+          return;
+        }
+        effectiveRange = range.cloneRange();
+        effectiveRange.setEnd(lastText, lastText.length);
+      }
+      const quote = effectiveRange.toString().replace(/\s+/g, ' ').trim();
       if (!quote) {
         setSelPopup(null);
         return;
       }
       // 选区矩形：归一化到所在页容器（只保留落在锚点页内的矩形）
       const holderRect = holder.getBoundingClientRect();
-      const clientRects = Array.from(range.getClientRects());
+      const clientRects = Array.from(effectiveRange.getClientRects());
       const rects: NormRect[] = [];
       for (const r of clientRects) {
         const cx = r.left + r.width / 2;
@@ -846,4 +864,12 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+// 页容器内的最后一个文本节点（跨页选区收敛到起始页时用）
+function lastTextNodeIn(root: Element): Text | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let last: Text | null = null;
+  while (walker.nextNode()) last = walker.currentNode as Text;
+  return last;
 }
