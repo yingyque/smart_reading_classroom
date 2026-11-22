@@ -19,11 +19,13 @@ export function verifyToken(token: string): JwtPayload | null {
 
 export function authRequired(req: AuthedRequest, res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
+  // <img src> 等浏览器原生请求无法携带 Authorization 头，允许 ?token= 查询参数兜底
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : undefined;
+  const token = header?.startsWith('Bearer ') ? header.slice(7) : queryToken;
+  if (!token) {
     res.status(401).json({ error: '未登录或令牌缺失' });
     return;
   }
-  const token = header.slice(7);
   try {
     const payload = verifyToken(token);
     if (!payload) {

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { NotebookPen, FileText, Pencil, Trash2, Loader2, X, Check, Users } from 'lucide-react';
+import { NotebookPen, FileText, Pencil, Trash2, Loader2, X, Check, Users, Download } from 'lucide-react';
 import { api } from '../lib/api';
 import { NoteItem, DocumentLite } from '../types';
 import { cn } from '../lib/cn';
+import { csvCell, saveCsv } from '../lib/csv';
 
 interface Props {
   classroomId: string;
@@ -107,8 +108,44 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
     }
   };
 
+  // 下载本人的学习笔记 CSV（时间戳 + 内容，高亮含原文/页码/颜色），按创建时间升序
+  const downloadMyNotes = () => {
+    const mine = notes.filter((n) => n.mine !== false);
+    if (!mine.length) return;
+    const header = ['创建时间', '更新时间', '文献', '类型', '高亮原文', '页码', '颜色', '笔记内容'];
+    const lines = [header.map(csvCell).join(',')];
+    for (const n of [...mine].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+      lines.push(
+        [
+          new Date(n.createdAt).toLocaleString('zh-CN', { hour12: false }),
+          new Date(n.updatedAt).toLocaleString('zh-CN', { hour12: false }),
+          n.documentTitle ?? '',
+          n.kind === 'highlight' ? '文献高亮' : '普通笔记',
+          n.quote ?? '',
+          n.page != null ? String(n.page) : '',
+          n.color ?? '',
+          n.content ?? '',
+        ].map(csvCell).join(','),
+      );
+    }
+    saveCsv(`我的学习笔记_${new Date().toISOString().slice(0, 10)}.csv`, lines);
+  };
+
+  const myNoteCount = notes.filter((n) => n.mine !== false).length;
+
   return (
     <div className="flex h-full flex-col bg-white">
+      {/* 顶部工具条：下载本人的笔记 */}
+      <div className="flex shrink-0 items-center justify-end px-3 py-1.5">
+        <button
+          onClick={downloadMyNotes}
+          disabled={!myNoteCount}
+          title="导出我的全部笔记（含时间戳与内容）"
+          className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Download size={13} /> 下载我的笔记 CSV
+        </button>
+      </div>
       {/* 笔记时间线 */}
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-auto p-4">
         {loading ? (

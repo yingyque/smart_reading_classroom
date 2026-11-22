@@ -97,6 +97,8 @@ model Message {
   senderId    String // 发起学生（AI 回复也归属到触发它的学生）
   isAiReply   Boolean     @default(false) // true 表示该条为 AI 的回复
   content     String      @db.Text
+  imagePath   String? // 随消息发送的聊天图片文件名（存 uploads/chat/，仅学生消息可为空文本）
+  quote       String?  @db.Text // 被引用消息快照 JSON：{id,senderName,content,hasImage}（小组讨论引用）
   createdAt   DateTime    @default(now())
 
   classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)

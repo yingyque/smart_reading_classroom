@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, FileText, AlertTriangle, ExternalLink, RotateCw, Search, X, ChevronUp, ChevronDown } from 'lucide-react';
+import { Loader2, FileText, AlertTriangle, ExternalLink, RotateCw, Search, X, ChevronUp, ChevronDown, Trash2 } from 'lucide-react';
 import { api, getToken } from '../lib/api';
 import { API_PREFIX } from '../lib/config';
 import { DocumentDetail, NoteItem } from '../types';
@@ -145,6 +145,19 @@ export default function DocumentViewer({ docId, classroomId, notesVersion, onNot
     }
   };
 
+  // 取消高亮：删除对应的高亮笔记
+  const removeHighlight = async (noteId: string) => {
+    try {
+      await api.delete(`/notes/${classroomId}/${noteId}`);
+      onNotesChanged?.();
+      return true;
+    } catch (err: any) {
+      console.error('取消高亮失败', err);
+      alert(err.response?.data?.error || '取消高亮失败');
+      return false;
+    }
+  };
+
   if (!docId) {
     return (
       <div className="flex h-full flex-col items-center justify-center text-ink-500">
@@ -186,6 +199,7 @@ export default function DocumentViewer({ docId, classroomId, notesVersion, onNot
               onRetry={() => setReloadKey((k) => k + 1)}
               highlights={highlights}
               onHighlight={saveHighlight}
+              onRemoveHighlight={removeHighlight}
             />
           ) : (
             <div className="flex h-full items-center justify-center text-ink-500">
@@ -244,11 +258,12 @@ interface PdfPagesProps {
   onRetry: () => void;
   highlights: NoteItem[];
   onHighlight: (sel: SelectionPopup, color: string) => Promise<boolean>;
+  onRemoveHighlight: (noteId: string) => Promise<boolean>;
 }
 
 // pdf.js 渲染：占位 div + IntersectionObserver 懒渲染进入视口的页面，控制内存。
 // 每页渲染 canvas（图像）+ TextLayer（透明文字层，支持选中/查找）+ 高亮/查找覆盖层。
-function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPagesProps) {
+function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemoveHighlight }: PdfPagesProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState('');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -262,6 +277,10 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPa
   // ---- 选中高亮状态 ----
   const [selPopup, setSelPopup] = useState<SelectionPopup | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // ---- 取消高亮状态：点击已保存的高亮矩形后弹出 ----
+  const [removePopup, setRemovePopup] = useState<{ x: number; y: number; noteId: string; quote: string } | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   // 供事件处理器读取最新值的 ref
   const highlightsRef = useRef(highlights);
@@ -608,10 +627,16 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPa
       timer = setTimeout(evaluate, 250);
     };
     document.addEventListener('selectionchange', onSelectionChange);
-    const onScroll = () => setSelPopup(null);
+    const onScroll = () => {
+      setSelPopup(null);
+      setRemovePopup(null);
+    };
     container.addEventListener('scroll', onScroll, true);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelPopup(null);
+      if (e.key === 'Escape') {
+        setSelPopup(null);
+        setRemovePopup(null);
+      }
     };
     document.addEventListener('keydown', onKey);
 
@@ -633,6 +658,68 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPa
       window.getSelection()?.removeAllRanges();
       setSelPopup(null);
     }
+  };
+
+  // ---- 点击已保存的高亮 → 弹「取消高亮」----
+  // 高亮覆盖层本身 pointer-events:none（不挡文字选中），这里用坐标命中检测代替
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const holder = target.closest('[data-page-idx]') as HTMLDivElement | null;
+      if (!holder || !container.contains(holder)) {
+        setRemovePopup(null);
+        return;
+      }
+      // 拖选文字结束时也会触发 click，此时视为选词而非点击高亮
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) {
+        setRemovePopup(null);
+        return;
+      }
+      const holderRect = holder.getBoundingClientRect();
+      const nx = (e.clientX - holderRect.left) / holderRect.width;
+      const ny = (e.clientY - holderRect.top) / holderRect.height;
+      const pageNum = Number(holder.dataset.pageIdx) + 1;
+      // 后画的在高亮层更靠上，命中多条时取最后一条
+      let hit: NoteItem | null = null;
+      for (const hl of highlightsRef.current) {
+        if (hl.page !== pageNum) continue;
+        let rects: NormRect[] = null as unknown as NormRect[];
+        try {
+          rects = JSON.parse(hl.rects || '[]');
+        } catch {
+          continue;
+        }
+        if (rects.some((r) => nx >= r.x && nx <= r.x + r.w && ny >= r.y && ny <= r.y + r.h)) {
+          hit = hl;
+        }
+      }
+      if (!hit) {
+        setRemovePopup(null);
+        return;
+      }
+      setRemovePopup({
+        x: Math.min(e.clientX, window.innerWidth - 200),
+        y: Math.min(e.clientY + 8, window.innerHeight - 60),
+        noteId: hit.id,
+        quote: (hit.quote || '').replace(/\s+/g, ' ').slice(0, 60),
+      });
+    };
+
+    container.addEventListener('click', onClick);
+    return () => container.removeEventListener('click', onClick);
+  }, []);
+
+  // 确认取消高亮：删除笔记后由外部刷新高亮列表
+  const confirmRemove = async () => {
+    if (!removePopup || removing) return;
+    setRemoving(true);
+    const ok = await onRemoveHighlight(removePopup.noteId);
+    setRemoving(false);
+    if (ok) setRemovePopup(null);
   };
 
   if (renderError) {
@@ -723,6 +810,34 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight }: PdfPa
             />
           ))}
           {saving && <Loader2 size={12} className="animate-spin text-ink-400" />}
+        </div>
+      )}
+
+      {/* 点击已有高亮后的取消弹窗 */}
+      {removePopup && (
+        <div
+          className="fixed z-50 flex items-center gap-2 rounded-xl border border-ink-900/10 bg-white px-2.5 py-2 shadow-lg"
+          style={{ left: removePopup.x, top: removePopup.y }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <span className="max-w-[150px] truncate text-xs text-ink-500" title={removePopup.quote}>
+            {removePopup.quote}
+          </span>
+          <button
+            onClick={() => void confirmRemove()}
+            disabled={removing}
+            className="flex shrink-0 items-center gap-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-500 transition-colors hover:bg-red-100 disabled:opacity-40"
+          >
+            {removing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+            取消高亮
+          </button>
+          <button
+            onClick={() => setRemovePopup(null)}
+            className="shrink-0 rounded p-0.5 text-ink-400 hover:text-ink-900"
+            title="关闭"
+          >
+            <X size={12} />
+          </button>
         </div>
       )}
     </div>

@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import TeacherDashboard from './pages/TeacherDashboard';
@@ -6,6 +7,10 @@ import Analytics from './pages/Analytics';
 import StudentHome from './pages/StudentHome';
 import ReadingRoom from './pages/ReadingRoom';
 import AdminDashboard from './pages/AdminDashboard';
+import ToastHost, { showToast } from './components/ToastHost';
+import { getSocket } from './lib/socket';
+import { setPendingQuoteNotify } from './lib/quoteNotify';
+import type { QuoteNotify } from './types';
 
 function Protected({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -29,11 +34,44 @@ function RoleGuard({ role, children }: { role: string; children: JSX.Element }) 
   return children;
 }
 
+// 学生端：消息被组员引用时的全局提醒（socket 单例，任何页面在线即可收到）
+function QuoteNotifyListener() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user?.role !== 'STUDENT') return;
+    const socket = getSocket();
+    const onNotify = (q: QuoteNotify) => {
+      showToast({
+        text: `${q.fromName} 引用了你的消息`,
+        detail: q.snippet,
+        durationMs: 8000,
+        onClick: () => {
+          // ReadingRoom 已挂载（同课堂）时走窗口事件直接定位；否则写入 pending，由挂载后的 ReadingRoom 消费
+          setPendingQuoteNotify(q);
+          navigate(`/reading/${q.classroomId}`);
+          window.dispatchEvent(new CustomEvent('quote:jump', { detail: q }));
+        },
+      });
+    };
+    socket.on('quote:notify', onNotify);
+    return () => {
+      socket.off('quote:notify', onNotify);
+    };
+  }, [user?.role, navigate]);
+
+  return null;
+}
+
 export default function App() {
   const { user } = useAuth();
 
   return (
-    <Routes>
+    <>
+      <QuoteNotifyListener />
+      <ToastHost />
+      <Routes>
       <Route path="/login" element={<Login />} />
       <Route
         path="/"
@@ -98,6 +136,7 @@ export default function App() {
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }

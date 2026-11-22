@@ -8,6 +8,24 @@ export interface User {
   role: Role;
 }
 
+// 被引用消息的快照（服务端随引用消息落库并返回）
+export interface MessageQuote {
+  id: string;
+  senderName: string;
+  content: string;
+  hasImage: boolean;
+}
+
+// 消息被引用时收到的提醒（服务端 quote:notify 事件）
+export interface QuoteNotify {
+  messageId: string;
+  quotedMessageId: string;
+  groupId: string;
+  classroomId: string;
+  fromName: string;
+  snippet: string;
+}
+
 export interface ChatMessage {
   id: string;
   type: MessageType;
@@ -18,6 +36,8 @@ export interface ChatMessage {
   senderName: string;
   isAiReply: boolean;
   content: string;
+  imagePath: string | null;
+  quote: MessageQuote | null;
   createdAt: string;
 }
 

@@ -16,6 +16,14 @@ export interface JwtPayload {
   role: Role;
 }
 
+// 被引用消息的快照（随引用消息落库，展示时不依赖原消息存在）
+export interface MessageQuote {
+  id: string;
+  senderName: string;
+  content: string;
+  hasImage: boolean;
+}
+
 // 实时聊天消息（落库后广播的形态）
 export interface ChatMessage {
   id: string;
@@ -27,6 +35,8 @@ export interface ChatMessage {
   senderName: string;
   isAiReply: boolean;
   content: string;
+  imagePath: string | null;
+  quote: MessageQuote | null;
   createdAt: string;
 }
 
@@ -35,16 +45,34 @@ export interface JoinGroupPayload {
   groupId: string;
 }
 
+// 消息被引用时对原作者的提醒（发到其私有房间 user:<id>）
+export interface QuoteNotifyPayload {
+  /** 引用产生的新消息 id */
+  messageId: string;
+  /** 被引用的原消息 id（前端跳转定位用） */
+  quotedMessageId: string;
+  groupId: string;
+  classroomId: string;
+  /** 引用者姓名 */
+  fromName: string;
+  /** 被引用内容摘要 */
+  snippet: string;
+}
+
 export interface SendPeerMessagePayload {
   groupId: string;
   documentId: string | null;
   content: string;
+  imagePath?: string | null;
+  /** 引用的消息 id（须为同小组的 PEER 消息） */
+  quoteId?: string | null;
 }
 
 export interface SendAiMessagePayload {
   groupId: string;
   documentId: string | null;
   content: string;
+  imagePath?: string | null;
 }
 
 // 分析聚合返回结构

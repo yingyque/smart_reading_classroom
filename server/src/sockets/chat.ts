@@ -1,14 +1,22 @@
 import { Server, Socket } from 'socket.io';
+import path from 'path';
 import { prisma } from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
 import { AiContextMessage, buildSystemPrompt } from '../services/aiService';
-import { runCodeBuddy, WorkspacePausedError } from '../services/containerService';
+import {
+  copyToWorkspace,
+  ensureWorkspace,
+  runCodeBuddy,
+  WorkspacePausedError,
+} from '../services/containerService';
 import { QueueTimeoutError } from '../services/execQueue';
 import { config } from '../config/env';
+import { CHAT_IMAGE_NAME_RE } from '../routes/chat';
 import {
   ChatMessage,
   JoinGroupPayload,
   JwtPayload,
+  MessageQuote,
   MessageType,
   Role,
   SendAiMessagePayload,
@@ -26,6 +34,11 @@ const userRoomOf = (userId: string) => `user:${userId}`;
 
 // 有待处理 AI 请求（排队中或执行中）的学生：防止一个学生连发多条把全局队列占满
 const pendingAiUsers = new Set<string>();
+
+// 校验聊天图片文件名（上传接口生成，防路径穿越）；非法返回 null
+function validChatImage(name: unknown): string | null {
+  return typeof name === 'string' && CHAT_IMAGE_NAME_RE.test(name) ? name : null;
+}
 
 export function registerChatHandlers(io: Server): void {
   // 握手鉴权
@@ -70,7 +83,28 @@ export function registerChatHandlers(io: Server): void {
       const group = await prisma.group.findUnique({ where: { id: payload.groupId } });
       if (!group) return;
       const content = (payload.content || '').trim();
-      if (!content) return;
+      const imagePath = validChatImage(payload.imagePath);
+      // 引用快照：被引消息必须是同小组的 PEER 消息
+      // （AI 对话是学生私聊，引用进小组会泄露内容，故不允许）
+      let quote: MessageQuote | null = null;
+      let quotedSenderId: string | null = null;
+      if (payload.quoteId) {
+        const src = await prisma.message.findUnique({
+          where: { id: payload.quoteId },
+          include: { sender: { select: { name: true } } },
+        });
+        if (src && src.type === 'PEER' && src.groupId === group.id) {
+          quotedSenderId = src.senderId;
+          quote = {
+            id: src.id,
+            senderName: src.sender.name,
+            content: src.content,
+            hasImage: !!src.imagePath,
+          };
+        }
+      }
+      // 纯图片 / 纯引用消息允许无文字
+      if (!content && !imagePath && !quote) return;
 
       const msg = await prisma.message.create({
         data: {
@@ -81,11 +115,25 @@ export function registerChatHandlers(io: Server): void {
           senderId: user.id,
           isAiReply: false,
           content,
+          imagePath: imagePath ?? null,
+          quote: quote ? JSON.stringify(quote) : null,
         },
       });
       const out = toChatMessage(msg, user.name);
       io.to(roomOf(group.id)).emit('message:new', out);
       io.to(teacherRoomOf(group.classroomId)).emit('message:new', out);
+
+      // 提醒被引用的原作者（引用自己的消息不打扰）
+      if (quote && quotedSenderId && quotedSenderId !== user.id) {
+        io.to(userRoomOf(quotedSenderId)).emit('quote:notify', {
+          messageId: msg.id,
+          quotedMessageId: quote.id,
+          groupId: group.id,
+          classroomId: group.classroomId,
+          fromName: user.name,
+          snippet: quote.content ? quote.content.slice(0, 60) : '[图片]',
+        });
+      }
     });
 
     // 学生向 AI 提问（学生↔AI）
@@ -93,7 +141,8 @@ export function registerChatHandlers(io: Server): void {
       const group = await prisma.group.findUnique({ where: { id: payload.groupId } });
       if (!group) return;
       const content = (payload.content || '').trim();
-      if (!content) return;
+      const imagePath = validChatImage(payload.imagePath);
+      if (!content && !imagePath) return;
 
       // 1) 落库并广播学生提问
       const userMsg = await prisma.message.create({
@@ -105,6 +154,7 @@ export function registerChatHandlers(io: Server): void {
           senderId: user.id,
           isAiReply: false,
           content,
+          imagePath: imagePath ?? null,
         },
       });
       const userOut = toChatMessage(userMsg, user.name);
@@ -129,7 +179,10 @@ export function registerChatHandlers(io: Server): void {
       const recentMessages: AiContextMessage[] = recent
         .reverse()
         .filter((m) => m.id !== userMsg.id)
-        .map((m) => ({ role: m.isAiReply ? 'assistant' : 'user', content: m.content }));
+        .map((m) => ({
+          role: m.isAiReply ? 'assistant' : 'user',
+          content: m.imagePath && !m.content ? '[图片]' : m.content,
+        }));
 
       // 3) 检查学生是否已配置个人 AI Key（统一共享 Key 已在注册/后台批量写入）
       const me = await prisma.user.findUnique({ where: { id: user.id } });
@@ -177,7 +230,24 @@ export function registerChatHandlers(io: Server): void {
       for (const m of recentMessages) {
         promptParts.push(m.role === 'assistant' ? `[AI]：${m.content}` : `[学生]：${m.content}`);
       }
-      promptParts.push(`[学生]：${content}\n\n请以 AI 讨论助手的身份直接回复上述最新问题。`);
+      // 随消息带图时：把图片 docker cp 进学生容器，让 AI 用 Read 工具看图后讨论
+      let imageNote = '';
+      if (imagePath) {
+        try {
+          const ws = await ensureWorkspace(group.classroomId, user.id);
+          const dest = `/tmp/${imagePath}`;
+          await copyToWorkspace(
+            ws.containerName,
+            path.join(config.uploadDir, 'chat', imagePath),
+            dest,
+          );
+          imageNote = `\n（学生随消息发送了一张图片，已存放在容器内 ${dest}，请先用 Read 工具查看该图片，再结合图片内容回复。）`;
+        } catch (err) {
+          console.error('[socket] 图片复制进工作台容器失败:', (err as Error).message);
+          imageNote = '\n（学生随消息发送了一张图片，但图片传递失败，请告知学生稍后重试。）';
+        }
+      }
+      promptParts.push(`[学生]：${content}${imageNote}\n\n请以 AI 讨论助手的身份直接回复上述最新问题。`);
       const prompt = promptParts.join('\n');
 
       let replyContent: string;
@@ -243,6 +313,17 @@ export function registerChatHandlers(io: Server): void {
   });
 }
 
+// 解析引用快照 JSON（坏数据按无引用处理）
+function parseQuote(raw: string | null): MessageQuote | null {
+  if (!raw) return null;
+  try {
+    const q = JSON.parse(raw) as MessageQuote;
+    return typeof q.id === 'string' && typeof q.senderName === 'string' ? q : null;
+  } catch {
+    return null;
+  }
+}
+
 function toChatMessage(
   msg: {
     id: string;
@@ -253,6 +334,8 @@ function toChatMessage(
     senderId: string;
     isAiReply: boolean;
     content: string;
+    imagePath: string | null;
+    quote: string | null;
     createdAt: Date;
   },
   senderName: string,
@@ -267,6 +350,8 @@ function toChatMessage(
     senderName: msg.isAiReply ? 'AI 助手' : senderName,
     isAiReply: msg.isAiReply,
     content: msg.content,
+    imagePath: msg.imagePath,
+    quote: parseQuote(msg.quote),
     createdAt: msg.createdAt.toISOString(),
   };
 }

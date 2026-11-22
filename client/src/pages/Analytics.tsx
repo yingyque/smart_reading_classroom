@@ -23,6 +23,7 @@ import {
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../context/AuthContext';
+import { csvCell, saveCsv } from '../lib/csv';
 import { AnalyticsResult, InteractionLogItem, QuestionLogItem, NoteLogItem } from '../types';
 import WordCloudPanel from '../components/charts/WordCloudPanel';
 import ActivityTimeline from '../components/charts/ActivityTimeline';
@@ -30,12 +31,7 @@ import GroupCompare from '../components/charts/GroupCompare';
 import InteractionNetwork from '../components/charts/InteractionNetwork';
 import MarkdownContent from '../components/MarkdownContent';
 
-// CSV 字段转义：引号包裹，内部引号翻倍，换行保留（Excel 可正确解析）
-function csvCell(v: string): string {
-  return `"${String(v ?? '').replace(/"/g, '""')}"`;
-}
-
-// 前端导出记录为 CSV（带 BOM，保证 Excel 打开中文不乱码）
+// 前端导出记录为 CSV
 // replyHeader 存在时额外导出配对的 AI 回答列（仅提问记录使用）
 function downloadRecordsCsv(
   filename: string,
@@ -57,13 +53,29 @@ function downloadRecordsCsv(
     if (replyHeader) cells.push('aiReply' in r ? r.aiReply ?? '' : '');
     lines.push(cells.map(csvCell).join(','));
   }
-  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  saveCsv(filename, lines);
+}
+
+// 导出学生学习笔记：时间戳 + 内容（高亮笔记含原文/页码/颜色），按创建时间升序
+function downloadNotesCsv(filename: string, rows: NoteLogItem[]) {
+  const header = ['创建时间', '更新时间', '学生', '文献', '类型', '高亮原文', '页码', '颜色', '笔记内容'];
+  const lines = [header.map(csvCell).join(',')];
+  for (const n of [...rows].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    lines.push(
+      [
+        new Date(n.createdAt).toLocaleString('zh-CN', { hour12: false }),
+        new Date(n.updatedAt).toLocaleString('zh-CN', { hour12: false }),
+        n.studentName,
+        n.documentTitle ?? '',
+        n.kind === 'highlight' ? '文献高亮' : '普通笔记',
+        n.quote ?? '',
+        n.page != null ? String(n.page) : '',
+        n.color ?? '',
+        n.content ?? '',
+      ].map(csvCell).join(','),
+    );
+  }
+  saveCsv(filename, lines);
 }
 
 export default function Analytics() {
@@ -117,9 +129,12 @@ export default function Analytics() {
   }, [classroomId]);
 
   // 教师加入全局监听，收到新消息时节流刷新看板
+  // 断线重连后需重新 teacher:watch（服务端房间随旧连接丢失）
   useEffect(() => {
     if (!classroomId || user?.role !== 'TEACHER') return;
-    socket.emit('teacher:watch', { classroomId });
+    const onConnect = () => socket.emit('teacher:watch', { classroomId });
+    socket.on('connect', onConnect);
+    if (socket.connected) onConnect();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const onNew = () => {
       if (timer) return;
@@ -130,6 +145,7 @@ export default function Analytics() {
     };
     socket.on('message:new', onNew);
     return () => {
+      socket.off('connect', onConnect);
       socket.off('message:new', onNew);
       if (timer) clearTimeout(timer);
     };
@@ -284,6 +300,15 @@ export default function Analytics() {
             title={`学生学习笔记（${notes.length} 条）`}
             icon={<NotebookPen size={16} />}
             className="lg:col-span-2"
+            action={
+              <button
+                onClick={() => downloadNotesCsv(`学生学习笔记_${new Date().toISOString().slice(0, 10)}.csv`, notes)}
+                disabled={!notes.length}
+                className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Download size={13} /> 下载 CSV
+              </button>
+            }
           >
             <p className="mb-2 text-xs text-ink-500">仅学生本人和老师可见；点击学生行查看该生的全部笔记</p>
             <div className="max-h-80 overflow-auto">
@@ -467,7 +492,7 @@ function StudentNotesModal({
         className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 头部：学生信息 + 关闭按钮 */}
+        {/* 头部：学生信息 + 下载 + 关闭按钮 */}
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 font-semibold text-ink-900">
@@ -476,12 +501,22 @@ function StudentNotesModal({
             </div>
             <div className="mt-0.5 text-xs text-ink-500">共 {notes.length} 条</div>
           </div>
-          <button
-            onClick={onClose}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-500 hover:bg-ink-900/5"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              onClick={() => downloadNotesCsv(`${studentName}的学习笔记_${new Date().toISOString().slice(0, 10)}.csv`, notes)}
+              disabled={!notes.length}
+              title="下载该生笔记（含时间戳与内容）"
+              className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1.5 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Download size={13} /> 下载 CSV
+            </button>
+            <button
+              onClick={onClose}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-500 hover:bg-ink-900/5"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="space-y-3">

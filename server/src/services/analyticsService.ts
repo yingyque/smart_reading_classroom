@@ -140,7 +140,7 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
       senderName: m.sender.name,
       groupName: m.group.name,
       documentTitle: m.document?.title ?? null,
-      content: m.content,
+      content: m.content || (m.imagePath ? '[发送了一张图片]' : ''),
       createdAt: m.createdAt,
       aiReply: replyByQuestion.get(m.id) ?? null,
     }))
@@ -154,7 +154,7 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
       senderName: m.sender.name,
       groupName: m.group.name,
       documentTitle: m.document?.title ?? null,
-      content: m.content,
+      content: m.content || (m.imagePath ? '[发送了一张图片]' : ''),
       createdAt: m.createdAt,
     }))
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
