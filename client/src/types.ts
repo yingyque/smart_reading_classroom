@@ -86,7 +86,7 @@ export interface NoteItem {
   documentId: string | null;
   documentTitle: string | null;
   content: string;
-  kind?: 'text' | 'highlight';
+  kind?: 'text' | 'highlight' | 'underline';
   quote?: string | null;
   page?: number | null;
   rects?: string | null;

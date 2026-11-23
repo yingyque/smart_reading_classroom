@@ -56,9 +56,9 @@ function downloadRecordsCsv(
   saveCsv(filename, lines);
 }
 
-// 导出学生学习笔记：时间戳 + 内容（高亮笔记含原文/页码/颜色），按创建时间升序
+// 导出学生学习笔记：时间戳 + 内容（标注类笔记含原文/页码/颜色），按创建时间升序
 function downloadNotesCsv(filename: string, rows: NoteLogItem[]) {
-  const header = ['创建时间', '更新时间', '学生', '文献', '类型', '高亮原文', '页码', '颜色', '笔记内容'];
+  const header = ['创建时间', '更新时间', '学生', '文献', '类型', '标注原文', '页码', '颜色', '笔记内容'];
   const lines = [header.map(csvCell).join(',')];
   for (const n of [...rows].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
     lines.push(
@@ -67,7 +67,7 @@ function downloadNotesCsv(filename: string, rows: NoteLogItem[]) {
         new Date(n.updatedAt).toLocaleString('zh-CN', { hour12: false }),
         n.studentName,
         n.documentTitle ?? '',
-        n.kind === 'highlight' ? '文献高亮' : '普通笔记',
+        n.kind === 'highlight' ? '文献高亮' : n.kind === 'underline' ? '文献划线' : '普通笔记',
         n.quote ?? '',
         n.page != null ? String(n.page) : '',
         n.color ?? '',
@@ -532,17 +532,27 @@ function StudentNotesModal({
                   {n.updatedAt !== n.createdAt && <span className="ml-1 italic">已编辑</span>}
                 </span>
               </div>
-              {n.kind === 'highlight' && (
+              {(n.kind === 'highlight' || n.kind === 'underline') && (
                 <blockquote
                   className={`mb-1.5 rounded-r-lg border-l-4 px-2.5 py-1.5 text-sm leading-relaxed ${
-                    n.color === 'blue'
-                      ? 'border-blue-400 bg-blue-50 text-blue-900'
-                      : n.color === 'green'
-                        ? 'border-emerald-400 bg-emerald-50 text-emerald-900'
-                        : 'border-amber-400 bg-amber-50 text-amber-900'
+                    n.kind === 'underline'
+                      ? 'border-slate-300 bg-slate-50 text-ink-900'
+                      : n.color === 'blue'
+                        ? 'border-blue-400 bg-blue-50 text-blue-900'
+                        : n.color === 'green'
+                          ? 'border-emerald-400 bg-emerald-50 text-emerald-900'
+                          : 'border-amber-400 bg-amber-50 text-amber-900'
                   }`}
                 >
-                  {n.quote}
+                  <span
+                    className={
+                      n.kind === 'underline'
+                        ? 'underline decoration-red-500 decoration-2 underline-offset-2'
+                        : undefined
+                    }
+                  >
+                    {n.quote}
+                  </span>
                   {n.page != null && (
                     <span className="ml-1.5 whitespace-nowrap text-[11px] font-normal opacity-70">
                       （第 {n.page} 页）
@@ -552,7 +562,7 @@ function StudentNotesModal({
               )}
               {n.content ? (
                 <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-900">{n.content}</p>
-              ) : n.kind === 'highlight' ? (
+              ) : n.kind === 'highlight' || n.kind === 'underline' ? (
                 <p className="text-xs italic text-ink-400">（未补充评论）</p>
               ) : null}
             </div>

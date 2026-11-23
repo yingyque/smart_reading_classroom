@@ -23,6 +23,36 @@ const HL_QUOTE_STYLE: Record<string, string> = {
   yellow: 'border-amber-400 bg-amber-50 text-amber-900',
 };
 
+// 划线笔记的引用块样式（左侧灰边 + 原文红色下划线，与 PDF 中的红线呼应）
+const UNDERLINE_QUOTE_STYLE = 'border-slate-300 bg-slate-50 text-ink-900';
+
+// 标注类笔记（高亮/划线）：以 quote 为正文，content 是可空的评论
+const isAnnotation = (n: NoteItem) => n.kind === 'highlight' || n.kind === 'underline';
+
+// 标注引用块：高亮按颜色着底色；划线用灰底 + 原文红色下划线（与 PDF 中的红线呼应）
+function NoteQuote({ n }: { n: NoteItem }) {
+  const isUnderline = n.kind === 'underline';
+  return (
+    <blockquote
+      className={cn(
+        'rounded-r-lg border-l-4 px-2.5 py-1.5 text-sm leading-relaxed',
+        isUnderline
+          ? UNDERLINE_QUOTE_STYLE
+          : HL_QUOTE_STYLE[n.color || 'yellow'] ?? HL_QUOTE_STYLE.yellow,
+      )}
+    >
+      <span className={isUnderline ? 'underline decoration-red-500 decoration-2 underline-offset-2' : undefined}>
+        {n.quote}
+      </span>
+      {n.page != null && (
+        <span className="ml-1.5 whitespace-nowrap text-[11px] font-normal opacity-70">
+          （第 {n.page} 页）
+        </span>
+      )}
+    </blockquote>
+  );
+}
+
 // 学生学习笔记面板：本人笔记可编辑，同小组组员笔记只读互见
 export default function NotePanel({ classroomId, documentId, documents, refreshKey, onNotesChanged }: Props) {
   const [notes, setNotes] = useState<NoteItem[]>([]);
@@ -79,9 +109,9 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
   const saveEdit = async () => {
     if (!editingId || busy) return;
     const content = editInput.trim();
-    // 普通笔记内容不能为空；高亮笔记的 content 是评论、允许清空
+    // 普通笔记内容不能为空；标注类笔记的 content 是评论、允许清空
     const editing = notes.find((n) => n.id === editingId);
-    if (editing?.kind !== 'highlight' && !content) return;
+    if (editing && !isAnnotation(editing) && !content) return;
     setBusy(true);
     try {
       await api.put(`/notes/${classroomId}/${editingId}`, { content });
@@ -108,11 +138,11 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
     }
   };
 
-  // 下载本人的学习笔记 CSV（时间戳 + 内容，高亮含原文/页码/颜色），按创建时间升序
+  // 下载本人的学习笔记 CSV（时间戳 + 内容，标注含原文/页码/颜色），按创建时间升序
   const downloadMyNotes = () => {
     const mine = notes.filter((n) => n.mine !== false);
     if (!mine.length) return;
-    const header = ['创建时间', '更新时间', '文献', '类型', '高亮原文', '页码', '颜色', '笔记内容'];
+    const header = ['创建时间', '更新时间', '文献', '类型', '标注原文', '页码', '颜色', '笔记内容'];
     const lines = [header.map(csvCell).join(',')];
     for (const n of [...mine].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
       lines.push(
@@ -120,7 +150,7 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
           new Date(n.createdAt).toLocaleString('zh-CN', { hour12: false }),
           new Date(n.updatedAt).toLocaleString('zh-CN', { hour12: false }),
           n.documentTitle ?? '',
-          n.kind === 'highlight' ? '文献高亮' : '普通笔记',
+          n.kind === 'highlight' ? '文献高亮' : n.kind === 'underline' ? '文献划线' : '普通笔记',
           n.quote ?? '',
           n.page != null ? String(n.page) : '',
           n.color ?? '',
@@ -209,22 +239,13 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
               </div>
               {editingId === n.id ? (
                 <div className="space-y-2">
-                  {n.kind === 'highlight' && (
-                    <blockquote
-                      className={cn(
-                      'rounded-r-lg border-l-4 px-2.5 py-1.5 text-sm',
-                      HL_QUOTE_STYLE[n.color || 'yellow'] ?? HL_QUOTE_STYLE.yellow,
-                    )}
-                    >
-                      {n.quote}
-                    </blockquote>
-                  )}
+                  {isAnnotation(n) && <NoteQuote n={n} />}
                   <textarea
                     value={editInput}
                     onChange={(e) => setEditInput(e.target.value)}
                     rows={3}
                     autoFocus
-                    placeholder={n.kind === 'highlight' ? '补充评论（可留空）…' : undefined}
+                    placeholder={isAnnotation(n) ? '补充评论（可留空）…' : undefined}
                     className="w-full resize-none rounded-lg border border-ink-900/10 bg-white px-2.5 py-2 text-sm text-ink-900 outline-none focus:border-brand-500"
                   />
                   <div className="flex justify-end gap-2">
@@ -236,28 +257,16 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
                     </button>
                     <button
                       onClick={saveEdit}
-                      disabled={busy || (n.kind !== 'highlight' && !editInput.trim())}
+                      disabled={busy || (!isAnnotation(n) && !editInput.trim())}
                       className="flex items-center gap-1 rounded-lg bg-brand-500 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-40"
                     >
                       <Check size={13} /> 保存
                     </button>
                   </div>
                 </div>
-              ) : n.kind === 'highlight' ? (
+              ) : isAnnotation(n) ? (
                 <div className="space-y-1.5">
-                  <blockquote
-                    className={cn(
-                      'rounded-r-lg border-l-4 px-2.5 py-1.5 text-sm leading-relaxed',
-                      HL_QUOTE_STYLE[n.color || 'yellow'] ?? HL_QUOTE_STYLE.yellow,
-                    )}
-                  >
-                    {n.quote}
-                    {n.page != null && (
-                      <span className="ml-1.5 whitespace-nowrap text-[11px] font-normal opacity-70">
-                        （第 {n.page} 页）
-                      </span>
-                    )}
-                  </blockquote>
+                  <NoteQuote n={n} />
                   {n.content ? (
                     <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-900">
                       {n.content}

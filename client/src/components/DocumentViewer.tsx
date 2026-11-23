@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, FileText, AlertTriangle, ExternalLink, RotateCw, Search, X, ChevronUp, ChevronDown, Trash2 } from 'lucide-react';
+import { Loader2, FileText, AlertTriangle, ExternalLink, RotateCw, Search, X, ChevronUp, ChevronDown, Trash2, Underline } from 'lucide-react';
 import { api, getToken } from '../lib/api';
 import { API_PREFIX } from '../lib/config';
 import { DocumentDetail, NoteItem } from '../types';
@@ -71,7 +71,7 @@ export default function DocumentViewer({ docId, classroomId, notesVersion, onNot
       .finally(() => setLoading(false));
   }, [docId]);
 
-  // 拉取当前文献的高亮笔记（只取本人 highlight 类型）
+  // 拉取当前文献的标注笔记（只取本人的 highlight/underline 类型）
   useEffect(() => {
     if (!docId) {
       setHighlights([]);
@@ -81,13 +81,16 @@ export default function DocumentViewer({ docId, classroomId, notesVersion, onNot
       .get(`/notes/${classroomId}/mine`)
       .then((res) =>
         setHighlights(
-          // 组员高亮在笔记面板互见即可；PDF 页面上只画本人的（避免无法区分归属）
+          // 组员标注在笔记面板互见即可；PDF 页面上只画本人的（避免无法区分归属）
           (res.data as NoteItem[]).filter(
-            (n) => n.kind === 'highlight' && n.documentId === docId && n.mine !== false,
+            (n) =>
+              (n.kind === 'highlight' || n.kind === 'underline') &&
+              n.documentId === docId &&
+              n.mine !== false,
           ),
         ),
       )
-      .catch((err) => console.error('加载高亮失败', err));
+      .catch((err) => console.error('加载标注失败', err));
   }, [classroomId, docId, notesVersion]);
 
   // PDF 需带 token：下载为 ArrayBuffer 交给 pdf.js 渲染；同时保留 blob URL 供「新窗口打开」兜底
@@ -124,11 +127,11 @@ export default function DocumentViewer({ docId, classroomId, notesVersion, onNot
     };
   }, [doc?.fileType, docId, reloadKey]);
 
-  // 选中文本 → 选色 → 保存为高亮笔记（评论可在笔记面板后补）
-  const saveHighlight = async (sel: SelectionPopup, color: string) => {
+  // 选中文本 → 选色高亮 / 划线 → 保存为标注笔记（评论可在笔记面板后补）
+  const saveHighlight = async (sel: SelectionPopup, kind: 'highlight' | 'underline', color: string | null) => {
     try {
       await api.post(`/notes/${classroomId}`, {
-        kind: 'highlight',
+        kind,
         documentId: docId,
         content: '',
         quote: sel.quote,
@@ -139,21 +142,21 @@ export default function DocumentViewer({ docId, classroomId, notesVersion, onNot
       onNotesChanged?.();
       return true;
     } catch (err: any) {
-      console.error('保存高亮失败', err);
-      alert(err.response?.data?.error || '保存高亮失败');
+      console.error('保存标注失败', err);
+      alert(err.response?.data?.error || '保存标注失败');
       return false;
     }
   };
 
-  // 取消高亮：删除对应的高亮笔记
+  // 取消标注：删除对应的标注笔记
   const removeHighlight = async (noteId: string) => {
     try {
       await api.delete(`/notes/${classroomId}/${noteId}`);
       onNotesChanged?.();
       return true;
     } catch (err: any) {
-      console.error('取消高亮失败', err);
-      alert(err.response?.data?.error || '取消高亮失败');
+      console.error('取消标注失败', err);
+      alert(err.response?.data?.error || '取消标注失败');
       return false;
     }
   };
@@ -257,7 +260,7 @@ interface PdfPagesProps {
   fallbackUrl: string;
   onRetry: () => void;
   highlights: NoteItem[];
-  onHighlight: (sel: SelectionPopup, color: string) => Promise<boolean>;
+  onHighlight: (sel: SelectionPopup, kind: 'highlight' | 'underline', color: string | null) => Promise<boolean>;
   onRemoveHighlight: (noteId: string) => Promise<boolean>;
 }
 
@@ -278,8 +281,14 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
   const [selPopup, setSelPopup] = useState<SelectionPopup | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // ---- 取消高亮状态：点击已保存的高亮矩形后弹出 ----
-  const [removePopup, setRemovePopup] = useState<{ x: number; y: number; noteId: string; quote: string } | null>(null);
+  // ---- 取消标注状态：点击已保存的高亮/划线矩形后弹出 ----
+  const [removePopup, setRemovePopup] = useState<{
+    x: number;
+    y: number;
+    noteId: string;
+    quote: string;
+    kind: 'highlight' | 'underline';
+  } | null>(null);
   const [removing, setRemoving] = useState(false);
 
   // 供事件处理器读取最新值的 ref
@@ -320,11 +329,15 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
         } catch {
           continue;
         }
-        const cls = HL_COLOR_CLASS[hl.color || 'yellow'] ?? HL_COLOR_CLASS.yellow;
+        // 划线：透明框只画底部红线；高亮：整块半透明底色
+        const cls =
+          hl.kind === 'underline'
+            ? 'pdf-underline-rect'
+            : `pdf-highlight-rect ${HL_COLOR_CLASS[hl.color || 'yellow'] ?? HL_COLOR_CLASS.yellow}`;
         for (const r of rects) {
           const div = document.createElement('div');
-          // 定位规则（absolute/pointer-events/mix-blend-mode）在 .pdf-highlight-rect，颜色类只管背景色
-          div.className = `pdf-highlight-rect ${cls}`;
+          // 定位规则（absolute/pointer-events）在 .pdf-highlight-rect / .pdf-underline-rect
+          div.className = cls;
           div.style.left = `${r.x * 100}%`;
           div.style.top = `${r.y * 100}%`;
           div.style.width = `${r.w * 100}%`;
@@ -670,7 +683,19 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
   const pickColor = async (color: string) => {
     if (!selPopup || saving) return;
     setSaving(true);
-    const ok = await onHighlight(selPopup, color);
+    const ok = await onHighlight(selPopup, 'highlight', color);
+    setSaving(false);
+    if (ok) {
+      window.getSelection()?.removeAllRanges();
+      setSelPopup(null);
+    }
+  };
+
+  // 点击划线按钮：保存划线笔记
+  const pickUnderline = async () => {
+    if (!selPopup || saving) return;
+    setSaving(true);
+    const ok = await onHighlight(selPopup, 'underline', null);
     setSaving(false);
     if (ok) {
       window.getSelection()?.removeAllRanges();
@@ -724,6 +749,7 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
         y: Math.min(e.clientY + 8, window.innerHeight - 60),
         noteId: hit.id,
         quote: (hit.quote || '').replace(/\s+/g, ' ').slice(0, 60),
+        kind: hit.kind === 'underline' ? 'underline' : 'highlight',
       });
     };
 
@@ -809,7 +835,7 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
           style={{ left: selPopup.x, top: selPopup.y }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <span className="text-xs text-ink-500">高亮</span>
+          <span className="text-xs text-ink-500">标注</span>
           {(['blue', 'green', 'yellow'] as const).map((c) => (
             <button
               key={c}
@@ -827,6 +853,15 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
               }}
             />
           ))}
+          <span className="mx-0.5 h-5 w-px bg-ink-900/10" />
+          <button
+            disabled={saving}
+            onClick={() => void pickUnderline()}
+            title="划线（下划线）"
+            className="flex h-5 w-5 items-center justify-center rounded-full border border-ink-900/10 text-red-500 transition-transform hover:scale-110 active:scale-95 disabled:opacity-40"
+          >
+            <Underline size={13} strokeWidth={2.5} />
+          </button>
           {saving && <Loader2 size={12} className="animate-spin text-ink-400" />}
         </div>
       )}
@@ -847,7 +882,7 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
             className="flex shrink-0 items-center gap-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-500 transition-colors hover:bg-red-100 disabled:opacity-40"
           >
             {removing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-            取消高亮
+            {removePopup.kind === 'underline' ? '取消划线' : '取消高亮'}
           </button>
           <button
             onClick={() => setRemovePopup(null)}

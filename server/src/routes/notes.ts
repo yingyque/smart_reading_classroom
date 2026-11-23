@@ -105,24 +105,27 @@ router.post('/:classroomId', authRequired, async (req: AuthedRequest, res: Respo
     color?: unknown;
   };
   const isHighlight = kind === 'highlight';
-  // 普通笔记必须有内容；高亮笔记 content 是评论、允许为空（以 quote 为正文）
-  if (!isHighlight && (typeof content !== 'string' || !content.trim())) {
+  const isUnderline = kind === 'underline';
+  const isAnnotation = isHighlight || isUnderline; // 高亮/划线：以 quote 为正文，content 是可空的评论
+  // 普通笔记必须有内容；标注类笔记 content 允许为空（以 quote 为正文）
+  if (!isAnnotation && (typeof content !== 'string' || !content.trim())) {
     return res.status(400).json({ error: '笔记内容不能为空' });
   }
-  if (isHighlight) {
+  if (isAnnotation) {
     if (typeof quote !== 'string' || !quote.trim()) {
-      return res.status(400).json({ error: '高亮内容不能为空' });
+      return res.status(400).json({ error: isHighlight ? '高亮内容不能为空' : '划线内容不能为空' });
     }
     if (typeof documentId !== 'string') {
-      return res.status(400).json({ error: '高亮必须关联文献' });
+      return res.status(400).json({ error: isHighlight ? '高亮必须关联文献' : '划线必须关联文献' });
     }
     if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) {
       return res.status(400).json({ error: '页码参数错误' });
     }
     if (!parseHighlightRects(rects)) {
-      return res.status(400).json({ error: '高亮区域数据错误' });
+      return res.status(400).json({ error: '标注区域数据错误' });
     }
-    if (typeof color !== 'string' || !HIGHLIGHT_COLORS.has(color)) {
+    // 划线只有一种样式，无需颜色；高亮必须带颜色
+    if (isHighlight && (typeof color !== 'string' || !HIGHLIGHT_COLORS.has(color))) {
       return res.status(400).json({ error: '高亮颜色错误' });
     }
   }
@@ -143,10 +146,10 @@ router.post('/:classroomId', authRequired, async (req: AuthedRequest, res: Respo
       userId: req.user!.id,
       documentId: typeof documentId === 'string' ? documentId : null,
       content: typeof content === 'string' ? content.trim() : '',
-      kind: isHighlight ? 'highlight' : 'text',
-      quote: isHighlight ? (quote as string).trim() : null,
-      page: isHighlight ? (page as number) : null,
-      rects: isHighlight ? (rects as string) : null,
+      kind: isHighlight ? 'highlight' : isUnderline ? 'underline' : 'text',
+      quote: isAnnotation ? (quote as string).trim() : null,
+      page: isAnnotation ? (page as number) : null,
+      rects: isAnnotation ? (rects as string) : null,
       color: isHighlight ? (color as string) : null,
     },
   });

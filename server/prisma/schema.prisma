@@ -118,7 +118,7 @@ model Note {
   userId      String // 笔记作者（学生本人）
   documentId  String? // 写笔记时正在阅读的文献；文献被删后置空（笔记保留）
   content     String   @db.Text
-  kind        String   @default("text") // text=普通笔记 | highlight=文献高亮
+  kind        String   @default("text") // text=普通笔记 | highlight=文献高亮 | underline=文献划线
   quote       String?  @db.Text // 高亮模式下选中的原文
   page        Int? // 高亮所在页码（1 起）
   rects       String?  @db.Text // 高亮选区矩形 JSON：[{x,y,w,h}]，归一化 0~1（相对页面）
