@@ -1,0 +1,40 @@
+# e2e 测试专用隔离栈：复用已构建的当前代码镜像 + 独立数据库，与生产完全隔离
+# 启动：docker compose -p sr-e2e -f docker-compose.e2e.yml up -d
+# 清理：docker compose -p sr-e2e -f docker-compose.e2e.yml down -v
+#
+# 与生产栈的差异：
+# - 端口 18080（不占用生产的 8080）
+# - 无持久卷（down -v 即彻底清除）
+# - 不挂 docker.sock：AI 工作台创建会失败但不阻断加入流程（e2e 覆盖 AI 未配置的降级提示路径）
+# - 不配置 AI Key 池：ai:send 走"AI 助手尚未就绪"提示分支
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: smart_reading
+      POSTGRES_PASSWORD: src_pg_2026_secret
+      POSTGRES_DB: smart_reading
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smart_reading -d smart_reading"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  server:
+    image: smart_reading_classroom-server:latest
+    environment:
+      PORT: 4000
+      CLIENT_ORIGIN: http://localhost:18080
+      JWT_SECRET: e2e-test-only-secret
+      DATABASE_URL: postgresql://smart_reading:src_pg_2026_secret@db:5432/smart_reading
+    depends_on:
+      db:
+        condition: service_healthy
+
+  client:
+    image: smart_reading_classroom-client:latest
+    ports:
+      - "18080:80"
+    depends_on:
+      - server
