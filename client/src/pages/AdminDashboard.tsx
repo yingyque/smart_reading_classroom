@@ -11,6 +11,7 @@ import {
   Users,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { localDateStr } from '../lib/csv';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/cn';
 import { Empty, LinkButton, MiniStat, StatCard, Td, Th } from '../components/admin/adminBits';
@@ -225,7 +226,7 @@ export default function AdminDashboard() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `学生名单_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `学生名单_${localDateStr()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };

@@ -188,9 +188,9 @@ function buildWordCloud(text: string): WordCloudItem[] {
 function buildTimeline(peer: { createdAt: Date }[], ai: { createdAt: Date }[]): TimelineItem[] {
   const bucket = new Map<string, { peer: number; ai: number }>();
   const key = (d: Date) => {
-    const dt = new Date(d);
-    dt.setMinutes(0, 0, 0);
-    return dt.toISOString().slice(0, 13).replace('T', ' ') + ':00';
+    // 转北京时间（UTC+8）再取整点，避免容器 UTC 环境导致横轴比北京时间差 8 小时
+    const beijing = new Date(d.getTime() + 8 * 60 * 60 * 1000);
+    return beijing.toISOString().slice(0, 13).replace('T', ' ') + ':00';
   };
   for (const m of peer) {
     const k = key(m.createdAt);

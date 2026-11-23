@@ -6,6 +6,11 @@ export function csvCell(v: string): string {
   return `"${String(v ?? '').replace(/"/g, '""')}"`;
 }
 
+// 本地日期串 YYYY-MM-DD（导出文件名用；toISOString 取的是 UTC 日期，北京时间 0-8 点会差一天）
+export function localDateStr(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // 组装 CSV 并触发下载
 export function saveCsv(filename: string, lines: string[]): void {
   const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });

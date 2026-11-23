@@ -23,7 +23,7 @@ import {
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../context/AuthContext';
-import { csvCell, saveCsv } from '../lib/csv';
+import { csvCell, localDateStr, saveCsv } from '../lib/csv';
 import { AnalyticsResult, InteractionLogItem, QuestionLogItem, NoteLogItem } from '../types';
 import WordCloudPanel from '../components/charts/WordCloudPanel';
 import ActivityTimeline from '../components/charts/ActivityTimeline';
@@ -237,7 +237,7 @@ export default function Analytics() {
             className="lg:col-span-2"
             action={
               <button
-                onClick={() => downloadRecordsCsv(`学生提问记录_${new Date().toISOString().slice(0, 10)}.csv`, data?.questions ?? [], '提问内容', 'AI 回答')}
+                onClick={() => downloadRecordsCsv(`学生提问记录_${localDateStr()}.csv`, data?.questions ?? [], '提问内容', 'AI 回答')}
                 disabled={!(data?.questions ?? []).length}
                 className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -302,7 +302,7 @@ export default function Analytics() {
             className="lg:col-span-2"
             action={
               <button
-                onClick={() => downloadNotesCsv(`学生学习笔记_${new Date().toISOString().slice(0, 10)}.csv`, notes)}
+                onClick={() => downloadNotesCsv(`学生学习笔记_${localDateStr()}.csv`, notes)}
                 disabled={!notes.length}
                 className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -359,7 +359,7 @@ export default function Analytics() {
             className="lg:col-span-2"
             action={
               <button
-                onClick={() => downloadRecordsCsv(`小组互动记录_${new Date().toISOString().slice(0, 10)}.csv`, data?.interactions ?? [], '发言内容')}
+                onClick={() => downloadRecordsCsv(`小组互动记录_${localDateStr()}.csv`, data?.interactions ?? [], '发言内容')}
                 disabled={!(data?.interactions ?? []).length}
                 className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -503,7 +503,7 @@ function StudentNotesModal({
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
-              onClick={() => downloadNotesCsv(`${studentName}的学习笔记_${new Date().toISOString().slice(0, 10)}.csv`, notes)}
+              onClick={() => downloadNotesCsv(`${studentName}的学习笔记_${localDateStr()}.csv`, notes)}
               disabled={!notes.length}
               title="下载该生笔记（含时间戳与内容）"
               className="flex items-center gap-1.5 rounded-lg border border-ink-900/10 px-2.5 py-1.5 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"

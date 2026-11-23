@@ -3,7 +3,7 @@ import { NotebookPen, FileText, Pencil, Trash2, Loader2, X, Check, Users, Downlo
 import { api } from '../lib/api';
 import { NoteItem, DocumentLite } from '../types';
 import { cn } from '../lib/cn';
-import { csvCell, saveCsv } from '../lib/csv';
+import { csvCell, localDateStr, saveCsv } from '../lib/csv';
 
 interface Props {
   classroomId: string;
@@ -128,7 +128,7 @@ export default function NotePanel({ classroomId, documentId, documents, refreshK
         ].map(csvCell).join(','),
       );
     }
-    saveCsv(`我的学习笔记_${new Date().toISOString().slice(0, 10)}.csv`, lines);
+    saveCsv(`我的学习笔记_${localDateStr()}.csv`, lines);
   };
 
   const myNoteCount = notes.filter((n) => n.mine !== false).length;

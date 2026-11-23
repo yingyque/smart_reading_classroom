@@ -3,6 +3,7 @@ services:
     image: postgres:16-alpine
     container_name: src-db
     environment:
+      TZ: Asia/Shanghai
       POSTGRES_USER: smart_reading
       POSTGRES_PASSWORD: src_pg_2026_secret
       POSTGRES_DB: smart_reading
@@ -19,6 +20,7 @@ services:
     build: ./server
     container_name: src-server
     environment:
+      TZ: Asia/Shanghai
       PORT: 4000
       # 前端访问地址（CORS 白名单），逗号分隔可配多个
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:8080}
@@ -63,6 +65,8 @@ services:
   client:
     build: ./client
     container_name: src-client
+    environment:
+      TZ: Asia/Shanghai
     ports:
       - "8080:80"
     depends_on:
