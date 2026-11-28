@@ -30,6 +30,7 @@ import ActivityTimeline from '../components/charts/ActivityTimeline';
 import GroupCompare from '../components/charts/GroupCompare';
 import InteractionNetwork from '../components/charts/InteractionNetwork';
 import MarkdownContent from '../components/MarkdownContent';
+import { HL_QUOTE_STYLE } from '../components/NotePanel';
 
 // 前端导出记录为 CSV
 // replyHeader 存在时额外导出配对的 AI 回答列（仅提问记录使用）
@@ -144,9 +145,12 @@ export default function Analytics() {
       }, 4000);
     };
     socket.on('message:new', onNew);
+    // 消息撤回后同步刷新看板（互动记录不再包含已撤回消息）
+    socket.on('message:recalled', onNew);
     return () => {
       socket.off('connect', onConnect);
       socket.off('message:new', onNew);
+      socket.off('message:recalled', onNew);
       if (timer) clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -537,11 +541,7 @@ function StudentNotesModal({
                   className={`mb-1.5 rounded-r-lg border-l-4 px-2.5 py-1.5 text-sm leading-relaxed ${
                     n.kind === 'underline'
                       ? 'border-slate-300 bg-slate-50 text-ink-900'
-                      : n.color === 'blue'
-                        ? 'border-blue-400 bg-blue-50 text-blue-900'
-                        : n.color === 'green'
-                          ? 'border-emerald-400 bg-emerald-50 text-emerald-900'
-                          : 'border-amber-400 bg-amber-50 text-amber-900'
+                      : HL_QUOTE_STYLE[n.color || 'yellow'] ?? HL_QUOTE_STYLE.yellow
                   }`}
                 >
                   <span

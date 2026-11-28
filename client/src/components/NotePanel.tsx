@@ -16,11 +16,13 @@ interface Props {
   onNotesChanged?: () => void;
 }
 
-// 高亮颜色 → 引用块样式（左边框 + 底色）
-const HL_QUOTE_STYLE: Record<string, string> = {
-  blue: 'border-blue-400 bg-blue-50 text-blue-900',
-  green: 'border-emerald-400 bg-emerald-50 text-emerald-900',
-  yellow: 'border-amber-400 bg-amber-50 text-amber-900',
+// 高亮颜色 → 引用块样式（左边框 + 底色，浅色系与 PDF 高亮一致；教师端 Analytics 复用）
+export const HL_QUOTE_STYLE: Record<string, string> = {
+  yellow: 'border-amber-300 bg-amber-50 text-amber-900',
+  green: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+  blue: 'border-blue-300 bg-blue-50 text-blue-900',
+  pink: 'border-pink-300 bg-pink-50 text-pink-900',
+  purple: 'border-purple-300 bg-purple-50 text-purple-900',
 };
 
 // 划线笔记的引用块样式（左侧灰边 + 原文红色下划线，与 PDF 中的红线呼应）

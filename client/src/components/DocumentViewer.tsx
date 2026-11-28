@@ -12,10 +12,21 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 // 高亮颜色 → CSS 类名（index.css 中的 .pdf-hl-*）
 const HL_COLOR_CLASS: Record<string, string> = {
-  blue: 'pdf-hl-blue',
-  green: 'pdf-hl-green',
   yellow: 'pdf-hl-yellow',
+  green: 'pdf-hl-green',
+  blue: 'pdf-hl-blue',
+  pink: 'pdf-hl-pink',
+  purple: 'pdf-hl-purple',
 };
+
+// 色板顺序 + 中文名 + 按钮展示色（与 .pdf-hl-* 同色的浅色系）
+const HL_COLORS = [
+  { key: 'yellow', title: '浅黄', swatch: 'rgba(253,224,71,.3)' },
+  { key: 'green', title: '浅绿', swatch: 'rgba(134,239,172,.3)' },
+  { key: 'blue', title: '浅蓝', swatch: 'rgba(147,197,253,.3)' },
+  { key: 'pink', title: '粉红', swatch: 'rgba(249,168,212,.3)' },
+  { key: 'purple', title: '浅紫', swatch: 'rgba(216,180,254,.3)' },
+] as const;
 
 // 归一化矩形（0~1，相对页面）
 interface NormRect {
@@ -420,6 +431,8 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
     if (!container) return;
     let cancelled = false;
     let observer: IntersectionObserver | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let pdf: PDFDocumentProxy | null = null;
 
     (async () => {
@@ -511,6 +524,28 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
           { rootMargin: '400px 0px' },
         );
         holders.forEach((h) => observer?.observe(h));
+
+        // 容器宽度变化（左右分栏拖拽、窗口缩放）：防抖后按新宽度重渲染已渲染的页。
+        // 否则画布被 CSS 拉伸、文字层仍按旧宽度定位，选中/查找会与画布错位
+        let lastWidth = container.clientWidth;
+        resizeObserver = new ResizeObserver(() => {
+          const w = container.clientWidth;
+          if (w === lastWidth) return;
+          lastWidth = w;
+          if (resizeTimer) clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(() => {
+            if (cancelled) return;
+            for (const h of holders) {
+              if (h.dataset.rendered !== '1') continue;
+              h.dataset.rendered = '0';
+              h.replaceChildren();
+              h.style.backgroundColor = '#f3f4f6';
+              const idx = Number(h.dataset.pageIdx);
+              if (!Number.isNaN(idx)) void renderPage(idx);
+            }
+          }, 300);
+        });
+        resizeObserver.observe(container);
       } catch (err) {
         if (!cancelled) setRenderError(`PDF 渲染失败（${(err as Error).message}）`);
       }
@@ -519,6 +554,8 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
     return () => {
       cancelled = true;
       observer?.disconnect();
+      resizeObserver?.disconnect();
+      if (resizeTimer) clearTimeout(resizeTimer);
       textLayersRef.current.forEach((tl) => tl?.cancel());
       pdf?.destroy();
       pdfRef.current = null;
@@ -880,21 +917,14 @@ function PdfPages({ data, fallbackUrl, onRetry, highlights, onHighlight, onRemov
           onMouseDown={(e) => e.preventDefault()}
         >
           <span className="text-xs text-ink-500">标注</span>
-          {(['blue', 'green', 'yellow'] as const).map((c) => (
+          {HL_COLORS.map((c) => (
             <button
-              key={c}
+              key={c.key}
               disabled={saving}
-              onClick={() => void pickColor(c)}
-              title={c === 'blue' ? '浅蓝' : c === 'green' ? '浅绿' : '浅黄'}
+              onClick={() => void pickColor(c.key)}
+              title={c.title}
               className="h-5 w-5 rounded-full border border-ink-900/10 transition-transform hover:scale-110 active:scale-95 disabled:opacity-40"
-              style={{
-                background:
-                  c === 'blue'
-                    ? 'rgba(59,130,246,.45)'
-                    : c === 'green'
-                      ? 'rgba(34,197,94,.45)'
-                      : 'rgba(234,179,8,.5)',
-              }}
+              style={{ background: c.swatch }}
             />
           ))}
           <span className="mx-0.5 h-5 w-px bg-ink-900/10" />

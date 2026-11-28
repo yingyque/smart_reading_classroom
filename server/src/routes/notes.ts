@@ -79,7 +79,8 @@ function parseHighlightRects(raw: unknown): { x: number; y: number; w: number; h
   return arr as { x: number; y: number; w: number; h: number }[];
 }
 
-const HIGHLIGHT_COLORS = new Set(['blue', 'green', 'yellow']);
+// 高亮颜色白名单（五种浅色；旧数据的 blue/green/yellow 仍在集合内）
+const HIGHLIGHT_COLORS = new Set(['yellow', 'green', 'blue', 'pink', 'purple']);
 
 // 学生新增笔记（自动关联当前正在阅读的文献）
 router.post('/:classroomId', authRequired, async (req: AuthedRequest, res: Response) => {

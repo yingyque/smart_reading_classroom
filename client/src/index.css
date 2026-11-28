@@ -78,9 +78,12 @@ body {
   mix-blend-mode: multiply;
 }
 
-.pdf-hl-blue { background: rgba(59, 130, 246, 0.25); }
-.pdf-hl-green { background: rgba(34, 197, 94, 0.25); }
-.pdf-hl-yellow { background: rgba(234, 179, 8, 0.3); }
+/* 五种浅色高亮（pastel 基色 + multiply 混合，文字保持清晰） */
+.pdf-hl-yellow { background: rgba(253, 224, 71, 0.3); }
+.pdf-hl-green { background: rgba(134, 239, 172, 0.3); }
+.pdf-hl-blue { background: rgba(147, 197, 253, 0.3); }
+.pdf-hl-pink { background: rgba(249, 168, 212, 0.3); }
+.pdf-hl-purple { background: rgba(216, 180, 254, 0.3); }
 
 /* PDF 划线标注（选中文本后加下划线）：矩形框透明，只在底部画一条红线 */
 .pdf-underline-rect {
