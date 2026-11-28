@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { Loader2, Settings, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { CHAT_FONT_SIZES, getChatFontSize, setChatFontSize, type ChatFontSize } from '../lib/chatFont';
 
-/** 设置弹窗：修改姓名（保存后全局生效，无需重新登录）、修改密码（需校验原密码） */
+/** 设置弹窗：修改姓名（保存后全局生效，无需重新登录）、修改密码（需校验原密码）、聊天文字大小 */
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const { user, updateUser } = useAuth();
   const [name, setName] = useState(user?.name || '');
+  const [chatFont, setChatFont] = useState<ChatFontSize>(getChatFontSize);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [oldPwd, setOldPwd] = useState('');
@@ -108,6 +110,30 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               disabled
               className="w-full cursor-not-allowed rounded-xl border border-ink-900/10 bg-ink-900/5 px-4 py-2.5 text-sm text-ink-500"
             />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-ink-700">聊天文字大小</label>
+            <div className="flex gap-2">
+              {CHAT_FONT_SIZES.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => {
+                    setChatFontSize(s.key);
+                    setChatFont(s.key);
+                  }}
+                  className={
+                    'flex-1 rounded-xl border px-3 py-2 transition-all ' +
+                    (chatFont === s.key
+                      ? 'border-brand-500 bg-brand-50 font-semibold text-brand-700'
+                      : 'border-ink-900/10 text-ink-700 hover:bg-ink-900/5')
+                  }
+                  style={{ fontSize: s.px }}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-ink-500">仅影响聊天消息与输入框文字，立即生效</p>
           </div>
         </div>
 
