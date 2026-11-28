@@ -44,6 +44,28 @@ function allowedExtOf(originalName: string): string | null {
 // 文件名规则（上传时生成，访问时校验，防路径穿越）
 export const CHAT_FILE_NAME_RE = /^chat-[A-Za-z0-9_-]+\.(png|jpg|gif|webp|pdf|doc|docx|ppt|pptx|xls|xlsx)$/;
 
+// 落库的 attachments JSON → 规范附件数组（sockets 广播、历史消息、分析端共用）
+// 旧消息没有 attachments 列时回退 filePath/fileOrigName；坏数据按无附件处理
+export function parseChatAttachments(
+  raw: unknown,
+  filePath: string | null,
+  fileOrigName: string | null,
+): { path: string; origName: string | null }[] {
+  if (Array.isArray(raw)) {
+    const out: { path: string; origName: string | null }[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== 'object') continue;
+      const p = (item as { path?: unknown }).path;
+      const n = (item as { origName?: unknown }).origName;
+      if (typeof p === 'string' && CHAT_FILE_NAME_RE.test(p)) {
+        out.push({ path: p, origName: typeof n === 'string' ? n.slice(0, 200) : null });
+      }
+    }
+    if (out.length) return out;
+  }
+  return filePath ? [{ path: filePath, origName: fileOrigName }] : [];
+}
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, CHAT_DIR),
   filename: (_req, file, cb) => {

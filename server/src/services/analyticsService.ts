@@ -1,4 +1,6 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { parseChatAttachments } from '../routes/chat';
 import {
   AnalyticsResult,
   GroupCompareItem,
@@ -53,11 +55,23 @@ function tokenizeRaw(text: string): string[] {
   return text.split(/[\s，。！？、；：,.!?;:()\[\]{}"'\n\r]+/);
 }
 
-// 附件消息在记录里的展示文案（无文字的纯附件消息用）
-function attachmentLabel(m: { filePath: string | null; fileOrigName: string | null }): string {
-  if (!m.filePath) return '';
-  if (/\.(png|jpg|gif|webp)$/.test(m.filePath)) return '[发送了一张图片]';
-  return m.fileOrigName ? `[发送了文件《${m.fileOrigName}》]` : '[发送了一个文件]';
+// 附件消息在记录里的展示文案（无文字的纯附件消息用；多附件合并为一条摘要）
+function attachmentLabel(m: {
+  attachments: Prisma.JsonValue | null;
+  filePath: string | null;
+  fileOrigName: string | null;
+}): string {
+  const files = parseChatAttachments(m.attachments, m.filePath, m.fileOrigName);
+  if (!files.length) return '';
+  const images = files.filter((f) => /\.(png|jpg|gif|webp)$/.test(f.path));
+  const docs = files.filter((f) => !/\.(png|jpg|gif|webp)$/.test(f.path));
+  const parts: string[] = [];
+  if (images.length === 1) parts.push('[发送了一张图片]');
+  else if (images.length > 1) parts.push(`[发送了 ${images.length} 张图片]`);
+  for (const d of docs) {
+    parts.push(d.origName ? `[发送了文件《${d.origName}》]` : '[发送了一个文件]');
+  }
+  return parts.join(' ');
 }
 
 export async function buildAnalytics(classroomId: string): Promise<AnalyticsResult> {

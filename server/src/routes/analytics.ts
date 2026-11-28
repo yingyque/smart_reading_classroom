@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authRequired, AuthedRequest } from '../middleware/auth';
 import { buildAnalytics } from '../services/analyticsService';
+import { parseChatAttachments } from './chat';
 
 const router = Router();
 
@@ -64,6 +65,7 @@ router.get('/:classroomId/messages/:groupId', authRequired, async (req: AuthedRe
       content: m.content,
       filePath: m.filePath,
       fileOrigName: m.fileOrigName,
+      attachments: parseChatAttachments(m.attachments, m.filePath, m.fileOrigName),
       quote: m.quote ? safeParseQuote(m.quote) : null,
       recalledAt: m.recalledAt ? m.recalledAt.toISOString() : null,
       createdAt: m.createdAt.toISOString(),

@@ -1,4 +1,5 @@
 import { Server, Socket } from 'socket.io';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
 import { AiContextMessage, buildSystemPrompt, describeChatImage } from '../services/aiService';
@@ -8,8 +9,9 @@ import {
 } from '../services/containerService';
 import { QueueTimeoutError } from '../services/execQueue';
 import { config } from '../config/env';
-import { CHAT_FILE_NAME_RE } from '../routes/chat';
+import { CHAT_FILE_NAME_RE, parseChatAttachments } from '../routes/chat';
 import {
+  ChatAttachment,
   ChatMessage,
   JoinGroupPayload,
   JwtPayload,
@@ -51,6 +53,28 @@ function validOrigName(name: unknown): string | null {
   if (typeof name !== 'string') return null;
   const t = name.trim();
   return t ? t.slice(0, 200) : null;
+}
+
+// 单条消息附件数上限
+const MAX_ATTACHMENTS = 5;
+
+// 校验客户端发来的多附件载荷（files 数组优先；旧客户端单文件 filePath 回退兼容）
+function validChatFiles(payload: { files?: unknown; filePath?: unknown; fileOrigName?: unknown }): ChatAttachment[] {
+  const out: ChatAttachment[] = [];
+  if (Array.isArray(payload.files)) {
+    for (const item of payload.files.slice(0, MAX_ATTACHMENTS)) {
+      if (!item || typeof item !== 'object') continue;
+      const path = validChatFile((item as { path?: unknown }).path);
+      if (!path) continue;
+      out.push({ path, origName: validOrigName((item as { origName?: unknown }).origName) });
+    }
+  }
+  // 旧缓存页面仍发单个 filePath：没有 files 时回退
+  if (!out.length) {
+    const legacy = validChatFile(payload.filePath);
+    if (legacy) out.push({ path: legacy, origName: validOrigName(payload.fileOrigName) });
+  }
+  return out;
 }
 
 export function registerChatHandlers(io: Server): void {
@@ -96,8 +120,8 @@ export function registerChatHandlers(io: Server): void {
       const group = await prisma.group.findUnique({ where: { id: payload.groupId } });
       if (!group) return;
       const content = (payload.content || '').trim();
-      const filePath = validChatFile(payload.filePath);
-      const fileOrigName = filePath ? validOrigName(payload.fileOrigName) : null;
+      const files = validChatFiles(payload);
+      const primary = files[0] ?? null;
       // 引用快照：被引消息必须是同小组的 PEER 消息
       // （AI 对话是学生私聊，引用进小组会泄露内容，故不允许）
       let quote: MessageQuote | null = null;
@@ -109,17 +133,19 @@ export function registerChatHandlers(io: Server): void {
         });
         if (src && src.type === 'PEER' && src.groupId === group.id && !src.recalledAt) {
           quotedSenderId = src.senderId;
+          const srcFiles = parseChatAttachments(src.attachments, src.filePath, src.fileOrigName);
+          const first = srcFiles[0];
           quote = {
             id: src.id,
             senderName: src.sender.name,
             content: src.content,
-            hasImage: !!src.filePath && isImageFileName(src.filePath),
-            fileName: src.filePath && !isImageFileName(src.filePath) ? src.fileOrigName : null,
+            hasImage: !!first && isImageFileName(first.path),
+            fileName: first && !isImageFileName(first.path) ? first.origName : null,
           };
         }
       }
       // 纯附件 / 纯引用消息允许无文字
-      if (!content && !filePath && !quote) return;
+      if (!content && !files.length && !quote) return;
 
       const msg = await prisma.message.create({
         data: {
@@ -130,8 +156,9 @@ export function registerChatHandlers(io: Server): void {
           senderId: user.id,
           isAiReply: false,
           content,
-          filePath: filePath ?? null,
-          fileOrigName: fileOrigName ?? null,
+          filePath: primary?.path ?? null,
+          fileOrigName: primary?.origName ?? null,
+          attachments: files.length ? (files as unknown as Prisma.InputJsonValue) : undefined,
           quote: quote ? JSON.stringify(quote) : null,
         },
       });
@@ -166,7 +193,7 @@ export function registerChatHandlers(io: Server): void {
       // 内容与附件一并清除：历史、分析、引用校验都不再可见（已落库的引用快照保留，与微信一致）
       const updated = await prisma.message.update({
         where: { id: msg.id },
-        data: { recalledAt: new Date(), content: '', filePath: null, fileOrigName: null },
+        data: { recalledAt: new Date(), content: '', filePath: null, fileOrigName: null, attachments: Prisma.DbNull },
       });
       const out = toChatMessage(updated, user.name);
       io.to(roomOf(msg.groupId)).emit('message:recalled', out);
@@ -178,9 +205,9 @@ export function registerChatHandlers(io: Server): void {
       const group = await prisma.group.findUnique({ where: { id: payload.groupId } });
       if (!group) return;
       const content = (payload.content || '').trim();
-      const filePath = validChatFile(payload.filePath);
-      const fileOrigName = filePath ? validOrigName(payload.fileOrigName) : null;
-      if (!content && !filePath) return;
+      const files = validChatFiles(payload);
+      const primary = files[0] ?? null;
+      if (!content && !files.length) return;
 
       // 1) 落库并广播学生提问
       const userMsg = await prisma.message.create({
@@ -192,8 +219,9 @@ export function registerChatHandlers(io: Server): void {
           senderId: user.id,
           isAiReply: false,
           content,
-          filePath: filePath ?? null,
-          fileOrigName: fileOrigName ?? null,
+          filePath: primary?.path ?? null,
+          fileOrigName: primary?.origName ?? null,
+          attachments: files.length ? (files as unknown as Prisma.InputJsonValue) : undefined,
         },
       });
       const userOut = toChatMessage(userMsg, user.name);
@@ -279,15 +307,22 @@ export function registerChatHandlers(io: Server): void {
       // 不再走「docker cp 进容器 + Read 工具看图」：上游网关拒绝 tool 结果里的
       // 图片块（400 messages[3].content[0].type），该路径对所有模型都不可用。
       let attachNote = '';
-      if (filePath) {
-        if (isImageFileName(filePath)) {
-          const desc = await describeChatImage(filePath);
-          attachNote = desc
-            ? `\n（学生随消息发送了一张图片，图片内容描述如下：\n${desc}\n请结合图片内容与学生的问题进行讨论。）`
-            : '\n（学生随消息发送了一张图片，但图片内容暂时无法识别，请告知学生稍后重试。）';
-        } else {
-          attachNote = `\n（学生随消息发送了文件《${fileOrigName ?? '未命名文件'}》，你无法直接读取该文件的内容，如与问题相关，请引导学生口述文件中的要点。）`;
+      if (files.length) {
+        const notes: string[] = [];
+        // 逐个调用视觉接口（避免并发触发限流）
+        for (const f of files) {
+          if (isImageFileName(f.path)) {
+            const desc = await describeChatImage(f.path);
+            notes.push(
+              desc
+                ? `图片《${f.origName ?? '图片'}》内容描述：\n${desc}`
+                : `图片《${f.origName ?? '图片'}》内容暂时无法识别`,
+            );
+          } else {
+            notes.push(`文件《${f.origName ?? '未命名文件'}》（你无法直接读取该文件的内容，如与问题相关，请引导学生口述文件中的要点）`);
+          }
         }
+        attachNote = `\n（学生随消息发送了 ${files.length} 个附件：\n${notes.join('\n')}\n请结合附件内容与学生的问题进行讨论。）`;
       }
       promptParts.push(`[学生]：${content}${attachNote}\n\n请以 AI 讨论助手的身份直接回复上述最新问题。`);
       const prompt = promptParts.join('\n');
@@ -378,6 +413,7 @@ function toChatMessage(
     content: string;
     filePath: string | null;
     fileOrigName: string | null;
+    attachments: Prisma.JsonValue | null;
     quote: string | null;
     recalledAt: Date | null;
     createdAt: Date;
@@ -396,6 +432,7 @@ function toChatMessage(
     content: msg.content,
     filePath: msg.filePath,
     fileOrigName: msg.fileOrigName,
+    attachments: parseChatAttachments(msg.attachments, msg.filePath, msg.fileOrigName),
     quote: parseQuote(msg.quote),
     recalledAt: msg.recalledAt ? msg.recalledAt.toISOString() : null,
     createdAt: msg.createdAt.toISOString(),

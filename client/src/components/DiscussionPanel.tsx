@@ -4,6 +4,7 @@ import { Socket } from 'socket.io-client';
 import { api, getToken } from '../lib/api';
 import { API_PREFIX } from '../lib/config';
 import { ChatMessage, MessageType, User } from '../types';
+import { CHAT_FONT_SIZES, getChatFontSize, subscribeChatFontSize } from '../lib/chatFont';
 import { cn } from '../lib/cn';
 import MarkdownContent from './MarkdownContent';
 
@@ -30,6 +31,9 @@ function formatSize(bytes: number): string {
 
 // 撤回时限（与服务端一致，微信同款 2 分钟）
 const RECALL_WINDOW_MS = 2 * 60 * 1000;
+
+// 单条消息附件数上限（与服务端 MAX_ATTACHMENTS 一致）
+const MAX_PENDING_FILES = 5;
 
 // 该消息当前是否可由我撤回（自己的小组消息、未撤回、2 分钟内）
 function canRecallMsg(m: ChatMessage, meId: string): boolean {
@@ -83,15 +87,18 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
   // 排队位次（null = 不在排队）：全班并发高时 AI 请求进全局队列，显示位次
   const [queuePos, setQueuePos] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  // 待发送附件（fileName=服务端存储名，preview=图片的本地 blob 预览，origName/size=原始文件名与大小）
-  const [pendingFile, setPendingFile] = useState<{
-    fileName: string;
-    preview: string | null;
-    isImage: boolean;
-    origName: string;
-    size: number;
-  } | null>(null);
-  const [uploading, setUploading] = useState(false);
+  // 待发送附件列表（fileName=服务端存储名，preview=图片的本地 blob 预览，origName/size=原始文件名与大小）
+  const [pendingFiles, setPendingFiles] = useState<
+    {
+      fileName: string;
+      preview: string | null;
+      isImage: boolean;
+      origName: string;
+      size: number;
+    }[]
+  >([]);
+  // 正在上传的附件数（>0 时回形针转圈、禁止再选）
+  const [uploadCount, setUploadCount] = useState(0);
   // 拖拽附件悬停高亮
   const [dragOver, setDragOver] = useState(false);
   // 正在引用的消息（小组讨论：引用自己或组员说过的话）
@@ -107,6 +114,15 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
   messagesRef.current = messages;
   // 自己撤回的文本消息原文：供「重新编辑」一键回填输入框（仅本次会话内有效）
   const [recalledDrafts, setRecalledDrafts] = useState<Record<string, string>>({});
+  // 聊天字号：设置弹窗里改档位（localStorage 持久化），事件广播后这里立即生效
+  const [fontPx, setFontPx] = useState(() => CHAT_FONT_SIZES.find((s) => s.key === getChatFontSize())!.px);
+  useEffect(
+    () =>
+      subscribeChatFontSize(() => {
+        setFontPx(CHAT_FONT_SIZES.find((s) => s.key === getChatFontSize())!.px);
+      }),
+    [],
+  );
 
   // 加载历史消息（silent=true 为静默同步：按 id 合并去重、不显示加载态；
   // 无新消息时返回原数组引用，避免触发无谓的重渲染和滚动）
@@ -238,55 +254,72 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
     setQuoting(null);
   }, [tab]);
 
-  // 上传聊天附件（粘贴 / 拖拽 / 附件按钮共用；图片与文档统一走 /chat/file）
-  const uploadFile = async (file: File) => {
-    if (uploading) return;
-    if (!isAllowedFileName(file.name)) {
-      alert('仅支持图片（PNG / JPG / GIF / WebP）与 PDF / Word / PPT / Excel 文件');
+  // 上传聊天附件（粘贴 / 拖拽 / 附件按钮共用；图片与文档统一走 /chat/file，一次最多 5 个）
+  const uploadFiles = async (files: File[]) => {
+    if (uploadCount > 0) return;
+    const room = MAX_PENDING_FILES - pendingFiles.length;
+    if (room <= 0) {
+      alert(`一次最多发送 ${MAX_PENDING_FILES} 个文件或图片`);
       return;
     }
-    if (file.size > 50 * 1024 * 1024) {
-      alert('文件不能超过 50MB');
-      return;
+    const list = files.slice(0, room);
+    if (files.length > room) {
+      alert(`一次最多发送 ${MAX_PENDING_FILES} 个文件或图片，已忽略多余的 ${files.length - room} 个`);
     }
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await api.post('/chat/file', fd);
-      const isImage = isImageFileName(file.name);
-      if (pendingFile?.preview) URL.revokeObjectURL(pendingFile.preview);
-      setPendingFile({
-        fileName: res.data.fileName,
-        preview: isImage ? URL.createObjectURL(file) : null,
-        isImage,
-        origName: file.name,
-        size: file.size,
-      });
-    } catch (err: any) {
-      console.error('附件上传失败', err);
-      const status: number | undefined = err.response?.status;
-      const msg: string | undefined = err.response?.data?.error;
-      // nginx（>55m 直接 413）与 multer（>50m 中文报错）都归一成大小限制提醒
-      if (status === 413 || /过大|too large/i.test(String(msg))) {
-        alert('文件过大，单个附件不能超过 50MB');
-      } else {
-        alert(msg || '附件上传失败');
+    // 顺序上传：保持选择顺序即发送顺序
+    for (const file of list) {
+      if (!isAllowedFileName(file.name)) {
+        alert(`「${file.name}」不支持：仅支持图片（PNG / JPG / GIF / WebP）与 PDF / Word / PPT / Excel 文件`);
+        continue;
       }
-    } finally {
-      setUploading(false);
+      if (file.size > 50 * 1024 * 1024) {
+        alert(`「${file.name}」超过 50MB，已忽略`);
+        continue;
+      }
+      setUploadCount((n) => n + 1);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await api.post('/chat/file', fd);
+        const isImage = isImageFileName(file.name);
+        setPendingFiles((prev) => [
+          ...prev,
+          {
+            fileName: res.data.fileName,
+            preview: isImage ? URL.createObjectURL(file) : null,
+            isImage,
+            origName: file.name,
+            size: file.size,
+          },
+        ]);
+      } catch (err: any) {
+        console.error('附件上传失败', err);
+        const status: number | undefined = err.response?.status;
+        const msg: string | undefined = err.response?.data?.error;
+        // nginx（>55m 直接 413）与 multer（>50m 中文报错）都归一成大小限制提醒
+        if (status === 413 || /过大|too large/i.test(String(msg))) {
+          alert(`「${file.name}」过大，单个附件不能超过 50MB`);
+        } else {
+          alert(`「${file.name}」上传失败：${msg || '请稍后重试'}`);
+        }
+      } finally {
+        setUploadCount((n) => n - 1);
+      }
     }
   };
 
   const pickFile = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) void uploadFile(file);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length) void uploadFiles(files);
     e.target.value = ''; // 允许连续选择同一个
   };
 
-  const removePendingFile = () => {
-    if (pendingFile?.preview) URL.revokeObjectURL(pendingFile.preview);
-    setPendingFile(null);
+  const removePendingFile = (index: number) => {
+    setPendingFiles((prev) => {
+      const f = prev[index];
+      if (f?.preview) URL.revokeObjectURL(f.preview);
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   // 拖拽附件进入输入区：高亮提示；松手即上传（仅取第一个支持的文件，其余忽略）
@@ -307,35 +340,34 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const file = Array.from(e.dataTransfer.files).find((f) => isAllowedFileName(f.name));
-    if (file) void uploadFile(file);
+    const files = Array.from(e.dataTransfer.files).filter((f) => isAllowedFileName(f.name));
+    if (files.length) void uploadFiles(files);
   };
 
   const send = () => {
     const content = input.trim();
-    const file = pendingFile;
-    if (!content && !file && !quoting) return;
+    const files = pendingFiles;
+    if (!content && !files.length && !quoting) return;
+    // files 数组优先；同时冗余发首附件的 filePath/fileOrigName，
+    // 升级部署瞬间旧服务端仍按单附件兼容处理
+    const payload = {
+      groupId,
+      documentId,
+      content,
+      filePath: files[0]?.fileName ?? null,
+      fileOrigName: files[0]?.origName ?? null,
+      files: files.map((f) => ({ path: f.fileName, origName: f.origName })),
+    };
     if (tab === 'PEER') {
-      socket.emit('peer:send', {
-        groupId,
-        documentId,
-        content,
-        filePath: file?.fileName ?? null,
-        fileOrigName: file?.origName ?? null,
-        quoteId: quoting?.id ?? null,
-      });
+      socket.emit('peer:send', { ...payload, quoteId: quoting?.id ?? null });
     } else {
-      socket.emit('ai:send', {
-        groupId,
-        documentId,
-        content,
-        filePath: file?.fileName ?? null,
-        fileOrigName: file?.origName ?? null,
-      });
+      socket.emit('ai:send', payload);
     }
     setInput('');
-    if (file?.preview) URL.revokeObjectURL(file.preview);
-    setPendingFile(null);
+    for (const f of files) {
+      if (f.preview) URL.revokeObjectURL(f.preview);
+    }
+    setPendingFiles([]);
     setQuoting(null);
   };
 
@@ -448,6 +480,7 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
               canQuote={tab === 'PEER'}
               canRecall={canRecallMsg(m, me.id)}
               reEditDraft={m.senderId === me.id && !m.isAiReply ? recalledDrafts[m.id] : undefined}
+              fontPx={fontPx}
               onQuote={setQuoting}
               onRecall={recall}
               onReEdit={reEdit}
@@ -499,10 +532,10 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
               <span className="shrink-0 font-medium text-brand-700">{quoting.senderName}</span>
               <span className="min-w-0 flex-1 truncate">
                 {quoting.content ||
-                  (quoting.filePath
-                    ? isImageFileName(quoting.filePath)
+                  (quoting.attachments?.length || quoting.filePath
+                    ? isImageFileName(quoting.attachments?.[0]?.path ?? quoting.filePath ?? '')
                       ? '[图片]'
-                      : `[文件] ${quoting.fileOrigName ?? ''}`
+                      : `[文件] ${quoting.attachments?.[0]?.origName ?? quoting.fileOrigName ?? ''}`
                     : '')}
               </span>
               <button
@@ -514,39 +547,44 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
               </button>
             </div>
           )}
-          {/* 待发送附件预览：图片缩略图 / 文件卡片 */}
-          {pendingFile && (
-            <div className="mb-1.5">
-              {pendingFile.isImage ? (
-                <div className="relative inline-block">
-                  <img
-                    src={pendingFile.preview!}
-                    alt="待发送图片"
-                    className="h-20 max-w-[160px] rounded-lg border border-ink-900/10 object-cover"
-                  />
-                  <button
-                    onClick={removePendingFile}
-                    title="移除图片"
-                    className="absolute -right-1.5 -top-1.5 rounded-full bg-ink-900/70 p-0.5 text-white transition-colors hover:bg-ink-900"
+          {/* 待发送附件预览：图片缩略图 / 文件卡片（多附件平铺，各自可移除） */}
+          {pendingFiles.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              {pendingFiles.map((f, i) =>
+                f.isImage ? (
+                  <div key={f.fileName} className="relative inline-block">
+                    <img
+                      src={f.preview!}
+                      alt="待发送图片"
+                      className="h-20 max-w-[160px] rounded-lg border border-ink-900/10 object-cover"
+                    />
+                    <button
+                      onClick={() => removePendingFile(i)}
+                      title="移除图片"
+                      className="absolute -right-1.5 -top-1.5 rounded-full bg-ink-900/70 p-0.5 text-white transition-colors hover:bg-ink-900"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    key={f.fileName}
+                    className="relative inline-flex max-w-[280px] items-center gap-2 rounded-lg border border-ink-900/10 bg-white px-2.5 py-1.5"
                   >
-                    <X size={12} />
-                  </button>
-                </div>
-              ) : (
-                <div className="relative inline-flex max-w-[280px] items-center gap-2 rounded-lg border border-ink-900/10 bg-white px-2.5 py-1.5">
-                  <FileText size={18} className="shrink-0 text-brand-500" />
-                  <span className="min-w-0 flex-1 truncate text-xs text-ink-900" title={pendingFile.origName}>
-                    {pendingFile.origName}
-                  </span>
-                  <span className="shrink-0 text-[10px] text-ink-400">{formatSize(pendingFile.size)}</span>
-                  <button
-                    onClick={removePendingFile}
-                    title="移除文件"
-                    className="shrink-0 rounded p-0.5 text-ink-400 transition-colors hover:bg-ink-900/5 hover:text-ink-900"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
+                    <FileText size={18} className="shrink-0 text-brand-500" />
+                    <span className="min-w-0 flex-1 truncate text-xs text-ink-900" title={f.origName}>
+                      {f.origName}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-ink-400">{formatSize(f.size)}</span>
+                    <button
+                      onClick={() => removePendingFile(i)}
+                      title="移除文件"
+                      className="shrink-0 rounded p-0.5 text-ink-400 transition-colors hover:bg-ink-900/5 hover:text-ink-900"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ),
               )}
             </div>
           )}
@@ -557,12 +595,12 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
               onChange={(e) => setInput(e.target.value)}
               onPaste={(e) => {
                 // 支持直接粘贴截图/图片文件（文档仍需点击 📎 或拖拽）
-                const file = Array.from(e.clipboardData.files).find((f) =>
+                const files = Array.from(e.clipboardData.files).filter((f) =>
                   isImageFileName(f.name) || f.type.startsWith('image/'),
                 );
-                if (file) {
+                if (files.length) {
                   e.preventDefault();
-                  void uploadFile(file);
+                  void uploadFiles(files);
                 }
               }}
               onKeyDown={(e) => {
@@ -586,26 +624,28 @@ export default function DiscussionPanel({ socket, classroomId, groupId, document
               }}
               rows={1}
               placeholder={tab === 'PEER' ? '对小组成员说点什么…' : '向 AI 提问…'}
-              className="max-h-28 min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-ink-900 outline-none placeholder:text-ink-500/50"
+              style={{ fontSize: fontPx }}
+              className="max-h-28 min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 leading-relaxed text-ink-900 outline-none placeholder:text-ink-500/50"
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              title="发送图片或文件"
+              disabled={uploadCount > 0}
+              title="发送图片或文件（一次最多 5 个）"
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-400 transition-colors hover:bg-ink-900/5 hover:text-ink-900 disabled:opacity-40"
             >
-              {uploading ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
+              {uploadCount > 0 ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
             </button>
             <input
               ref={fileInputRef}
               type="file"
               accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+              multiple
               className="hidden"
               onChange={pickFile}
             />
             <button
               onClick={send}
-              disabled={!input.trim() && !pendingFile && !quoting}
+              disabled={!input.trim() && pendingFiles.length === 0 && !quoting}
               className={cn(
                 'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white transition-all active:scale-90 disabled:opacity-40',
                 tab === 'PEER' ? 'bg-brand-500 hover:bg-brand-600' : 'bg-violet-500 hover:brightness-110',
@@ -671,6 +711,7 @@ function Bubble({
   canQuote,
   canRecall,
   reEditDraft,
+  fontPx,
   onQuote,
   onRecall,
   onReEdit,
@@ -685,6 +726,8 @@ function Bubble({
   canRecall: boolean;
   /** 自己撤回的文本消息原文：存在则显示「重新编辑」 */
   reEditDraft?: string;
+  /** 聊天字号（设置里三档可调，立即生效） */
+  fontPx: number;
   onQuote: (m: ChatMessage) => void;
   onRecall: (m: ChatMessage) => void;
   onReEdit: (id: string) => void;
@@ -693,6 +736,12 @@ function Bubble({
   onContextMenu: (e: ReactMouseEvent, msg: ChatMessage) => void;
 }) {
   const isAi = msg.isAiReply;
+  // 附件列表：新消息走 attachments 数组；旧服务端响应/旧消息回退 filePath
+  const files = msg.attachments?.length
+    ? msg.attachments
+    : msg.filePath
+      ? [{ path: msg.filePath, origName: msg.fileOrigName }]
+      : [];
   // 已撤回：仅保留灰色提示（id 供引用跳转定位）；有保存原文时可「重新编辑」
   if (msg.recalledAt) {
     return (
@@ -744,8 +793,9 @@ function Bubble({
         )}
       </div>
       <div
+        style={{ fontSize: fontPx }}
         className={cn(
-          'max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed',
+          'max-w-[85%] rounded-2xl px-3.5 py-2 leading-relaxed',
           isAi
             ? 'rounded-tl-sm bg-violet-500/10 text-ink-900'
             : mine
@@ -778,20 +828,20 @@ function Bubble({
             </span>
           </button>
         ) : null}
-        {!isAi && (
-          <>
-            {msg.content}
-            {msg.filePath &&
-              (isImageFileName(msg.filePath) ? (
+        {!isAi && msg.content}
+        {!isAi && files.length > 0 && (
+          <div className={cn('flex flex-wrap gap-1.5', msg.content && 'mt-1')}>
+            {files.map((f) =>
+              isImageFileName(f.path) ? (
                 <a
-                  href={chatFileUrl(msg.filePath)}
+                  key={f.path}
+                  href={chatFileUrl(f.path)}
                   target="_blank"
                   rel="noreferrer"
                   title="点击查看大图"
-                  className="mt-1 block"
                 >
                   <img
-                    src={chatFileUrl(msg.filePath)}
+                    src={chatFileUrl(f.path)}
                     alt="聊天图片"
                     loading="lazy"
                     className="max-h-52 max-w-full rounded-lg bg-white/10 object-contain"
@@ -799,25 +849,27 @@ function Bubble({
                 </a>
               ) : (
                 <a
-                  href={chatFileUrl(msg.filePath)}
+                  key={f.path}
+                  href={chatFileUrl(f.path)}
                   target="_blank"
                   rel="noreferrer"
                   download
                   title="点击下载文件"
                   className={cn(
-                    'mt-1 flex max-w-[240px] items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors',
+                    'flex max-w-[240px] items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors',
                     mine ? 'bg-white/15 hover:bg-white/25' : 'bg-black/5 hover:bg-black/10',
                   )}
                 >
                   <FileText size={18} className={mine ? 'shrink-0 text-white/80' : 'shrink-0 text-brand-500'} />
                   <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-xs font-medium" title={msg.fileOrigName ?? undefined}>
-                      {msg.fileOrigName || '点击下载文件'}
+                    <span className="truncate text-xs font-medium" title={f.origName ?? undefined}>
+                      {f.origName || '点击下载文件'}
                     </span>
                   </span>
                 </a>
-              ))}
-          </>
+              ),
+            )}
+          </div>
         )}
       </div>
     </div>

@@ -26,6 +26,14 @@ export interface MessageQuote {
   fileName?: string | null;
 }
 
+// 单个聊天附件（服务端已校验存储名，防路径穿越）
+export interface ChatAttachment {
+  /** 服务端存储名（uploads/chat/ 下） */
+  path: string;
+  /** 用户侧原始文件名（气泡展示用） */
+  origName: string | null;
+}
+
 // 实时聊天消息（落库后广播的形态）
 export interface ChatMessage {
   id: string;
@@ -40,6 +48,8 @@ export interface ChatMessage {
   filePath: string | null;
   /** 附件原始文件名（无附件时为 null） */
   fileOrigName: string | null;
+  /** 附件列表（服务端已归一化：新消息读 attachments 列，旧消息由 filePath 回退；无附件为空数组） */
+  attachments: ChatAttachment[];
   quote: MessageQuote | null;
   /** 撤回时间（null=未撤回）；撤回后 content/filePath 已清空 */
   recalledAt: string | null;
@@ -72,6 +82,8 @@ export interface SendPeerMessagePayload {
   filePath?: string | null;
   /** 附件原始文件名（随 filePath 一起校验存储） */
   fileOrigName?: string | null;
+  /** 多附件数组（新客户端；优先于 filePath，两者都没有时回退 filePath） */
+  files?: { path: string; origName?: string | null }[] | null;
   /** 引用的消息 id（须为同小组的 PEER 消息） */
   quoteId?: string | null;
 }
@@ -82,6 +94,8 @@ export interface SendAiMessagePayload {
   content: string;
   filePath?: string | null;
   fileOrigName?: string | null;
+  /** 多附件数组（新客户端；优先于 filePath，两者都没有时回退 filePath） */
+  files?: { path: string; origName?: string | null }[] | null;
 }
 
 // 撤回自己的小组消息（仅 PEER，2 分钟内）

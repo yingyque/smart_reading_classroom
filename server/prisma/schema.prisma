@@ -97,8 +97,9 @@ model Message {
   senderId    String // 发起学生（AI 回复也归属到触发它的学生）
   isAiReply   Boolean     @default(false) // true 表示该条为 AI 的回复
   content     String      @db.Text
-  filePath    String? @map("imagePath") // 随消息发送的附件文件名（存 uploads/chat/：图片 / PDF / Word / PPT / Excel）
-  fileOrigName String? // 附件原始文件名（气泡展示用；撤回时与 filePath 一并清除）
+  filePath    String? @map("imagePath") // 首附件文件名（冗余存储，兼容旧客户端；存 uploads/chat/：图片 / PDF / Word / PPT / Excel）
+  fileOrigName String? // 首附件原始文件名（气泡展示用；撤回时与 filePath 一并清除）
+  attachments Json?    // 附件数组 JSON：[{path, origName}]（一条消息可带多个附件，上限 5 个）
   quote       String?  @db.Text // 被引用消息快照 JSON：{id,senderName,content,hasImage}（小组讨论引用）
   recalledAt  DateTime? // 撤回时间（微信式撤回：撤回后内容与图片清空，仅保留提示；null=未撤回）
   createdAt   DateTime    @default(now())

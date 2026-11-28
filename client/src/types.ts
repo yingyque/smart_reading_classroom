@@ -28,6 +28,14 @@ export interface QuoteNotify {
   snippet: string;
 }
 
+// 聊天附件（服务端已归一化：多附件取 attachments 数组，旧消息回退 filePath）
+export interface ChatAttachment {
+  /** 服务端存储文件名（uploads/chat/ 下，防路径穿越校验过的） */
+  path: string;
+  /** 原始文件名（气泡展示用；缺失为 null） */
+  origName: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   type: MessageType;
@@ -41,6 +49,8 @@ export interface ChatMessage {
   filePath: string | null;
   /** 附件原始文件名（无附件时为 null） */
   fileOrigName: string | null;
+  /** 附件数组（服务端归一化，无附件为空数组；旧服务端响应可能缺省，展示层需回退 filePath） */
+  attachments?: ChatAttachment[];
   quote: MessageQuote | null;
   /** 撤回时间（null=未撤回）；撤回后 content/filePath 为空 */
   recalledAt: string | null;
