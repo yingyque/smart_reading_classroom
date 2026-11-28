@@ -44,6 +44,42 @@ function allowedExtOf(originalName: string): string | null {
 // 文件名规则（上传时生成，访问时校验，防路径穿越）
 export const CHAT_FILE_NAME_RE = /^chat-[A-Za-z0-9_-]+\.(png|jpg|gif|webp|pdf|doc|docx|ppt|pptx|xls|xlsx)$/;
 
+// ===== 文件头（magic number）校验：按存储扩展名核对真实内容，防改名伪造 =====
+// OLE2 复合文档头（旧版 Office 二进制 .doc/.ppt/.xls）
+const isOle2 = (b: Buffer) =>
+  b.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]));
+// ZIP 头 PK\x03\x04（新版 Office .docx/.pptx/.xlsx 本质是 zip）
+const isZip = (b: Buffer) =>
+  b[0] === 0x50 && b[1] === 0x4b && (b[2] === 3 || b[2] === 5 || b[2] === 7) && b[3] === 4;
+const MAGIC_BY_EXT: Record<string, (head: Buffer) => boolean> = {
+  png: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  jpg: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  gif: (b) => b.subarray(0, 3).toString('latin1') === 'GIF',
+  webp: (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
+  pdf: (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
+  doc: isOle2,
+  ppt: isOle2,
+  xls: isOle2,
+  docx: isZip,
+  pptx: isZip,
+  xlsx: isZip,
+};
+
+// 读文件前 12 字节核对签名（读不了按不匹配处理，调用方负责删文件）
+function headMatches(filePath: string, check: (head: Buffer) => boolean): boolean {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const head = Buffer.alloc(12);
+    const n = fs.readSync(fd, head, 0, head.length, 0);
+    return check(head.subarray(0, n));
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+}
+
 // 落库的 attachments JSON → 规范附件数组（sockets 广播、历史消息、分析端共用）
 // 旧消息没有 attachments 列时回退 filePath/fileOrigName；坏数据按无附件处理
 export function parseChatAttachments(
@@ -103,6 +139,19 @@ function sendChatFile(req: AuthedRequest, res: Response) {
 // 上传聊天附件（登录即可，学生教师通用）
 router.post('/file', authRequired, upload.single('file'), (req: AuthedRequest, res: Response) => {
   if (!req.file) return res.status(400).json({ error: '请选择文件' });
+  // 内容校验：文件头与扩展名不符（改名伪造 / 文件损坏）→ 删除已落盘文件并拒绝
+  const ext = path.extname(req.file.filename).slice(1);
+  const checkHead = MAGIC_BY_EXT[ext];
+  if (checkHead && !headMatches(req.file.path, checkHead)) {
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch {
+      // 删除失败不影响响应（残留文件无法通过 CHAT_FILE_NAME_RE 之外的路径访问）
+    }
+    return res.status(400).json({
+      error: `「${req.file.originalname}」内容与文件类型不符（扩展名可能被改动，或文件已损坏），请上传原文件`,
+    });
+  }
   return res.json({ fileName: req.file.filename });
 });
 
