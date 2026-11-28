@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, BookOpenText, ChevronDown, Loader2, Settings, Users, Bot, NotebookPen } from 'lucide-react';
 import { api } from '../lib/api';
@@ -33,6 +33,53 @@ export default function ReadingRoom() {
   // 未读角标：非当前标签收到新消息时计数，切到该标签清零
   const [peerUnread, setPeerUnread] = useState(0);
   const [aiUnread, setAiUnread] = useState(0);
+
+  // ---- 左右分栏：桌面端可拖拽调整右侧面板宽度（localStorage 持久化） ----
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 768px)').matches);
+  const [asideWidth, setAsideWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('reading-aside-width'));
+    return saved >= 320 && saved <= 720 ? saved : 420;
+  });
+  const [draggingAside, setDraggingAside] = useState(false);
+  const splitRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = () => setIsDesktop(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // 拖拽分栏：全局监听 pointermove，面板宽度 = 容器右缘 - 指针 x
+  useEffect(() => {
+    if (!draggingAside) return;
+    const onMove = (e: PointerEvent) => {
+      const rect = splitRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const w = rect.right - e.clientX;
+      // 右侧面板 320~720px，且左侧阅读区至少留 320px
+      const max = Math.max(Math.min(rect.width - 320, 720), 320);
+      setAsideWidth(Math.min(Math.max(w, 320), max));
+    };
+    const onUp = () => setDraggingAside(false);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [draggingAside]);
+
+  // 宽度持久化（下次进入阅读室保持）
+  useEffect(() => {
+    localStorage.setItem('reading-aside-width', String(asideWidth));
+  }, [asideWidth]);
 
   // 切换右侧面板标签（进入标签时清除对应未读数）
   const switchAsideTab = (tab: 'peer' | 'ai' | 'note') => {
@@ -169,9 +216,9 @@ export default function ReadingRoom() {
         </div>
       </header>
 
-      {/* 左读右聊 */}
-      <div className="flex flex-1 overflow-hidden">
-        <section className="flex-1 overflow-hidden border-r border-ink-900/5 bg-white md:w-[60%]">
+      {/* 左读右聊（中间分栏可拖拽调整宽度） */}
+      <div ref={splitRef} className="flex flex-1 overflow-hidden">
+        <section className="flex-1 overflow-hidden bg-white">
           {classroomId && (
             <DocumentViewer
               docId={activeDocId}
@@ -181,7 +228,26 @@ export default function ReadingRoom() {
             />
           )}
         </section>
-        <aside className="flex w-full flex-col md:w-[40%] md:min-w-[380px] md:max-w-[520px]">
+        {/* 分栏拖拽手柄（仅桌面端）：拖动调整宽度，双击恢复默认 */}
+        <div
+          onPointerDown={(e: ReactPointerEvent) => {
+            e.preventDefault();
+            setDraggingAside(true);
+          }}
+          onDoubleClick={() => setAsideWidth(420)}
+          title="拖动调整左右宽度，双击恢复默认"
+          className={cn(
+            'relative hidden w-1 shrink-0 cursor-col-resize bg-ink-900/5 transition-colors hover:bg-brand-500/60 md:block',
+            draggingAside && 'bg-brand-500 hover:bg-brand-500',
+          )}
+        >
+          {/* 扩大点击命中区域（手柄左右各 8px） */}
+          <div className="absolute inset-y-0 -left-2 -right-2" />
+        </div>
+        <aside
+          className="flex w-full flex-col md:shrink-0"
+          style={isDesktop ? { width: asideWidth, maxWidth: 'calc(100% - 320px)' } : undefined}
+        >
           {/* 面板切换：小组讨论 / AI 讨论 / 学习笔记（带未读角标） */}
           <div className="flex shrink-0 border-b border-ink-900/5 bg-white px-2 pt-2">
             <button
