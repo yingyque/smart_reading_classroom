@@ -97,8 +97,10 @@ model Message {
   senderId    String // 发起学生（AI 回复也归属到触发它的学生）
   isAiReply   Boolean     @default(false) // true 表示该条为 AI 的回复
   content     String      @db.Text
-  imagePath   String? // 随消息发送的聊天图片文件名（存 uploads/chat/，仅学生消息可为空文本）
+  filePath    String? @map("imagePath") // 随消息发送的附件文件名（存 uploads/chat/：图片 / PDF / Word / PPT / Excel）
+  fileOrigName String? // 附件原始文件名（气泡展示用；撤回时与 filePath 一并清除）
   quote       String?  @db.Text // 被引用消息快照 JSON：{id,senderName,content,hasImage}（小组讨论引用）
+  recalledAt  DateTime? // 撤回时间（微信式撤回：撤回后内容与图片清空，仅保留提示；null=未撤回）
   createdAt   DateTime    @default(now())
 
   classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
@@ -122,7 +124,7 @@ model Note {
   quote       String?  @db.Text // 高亮模式下选中的原文
   page        Int? // 高亮所在页码（1 起）
   rects       String?  @db.Text // 高亮选区矩形 JSON：[{x,y,w,h}]，归一化 0~1（相对页面）
-  color       String? // 高亮颜色：blue | green | yellow
+  color       String? // 高亮颜色：yellow | green | blue | pink | purple（五种浅色）
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

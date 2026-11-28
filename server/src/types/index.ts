@@ -22,6 +22,8 @@ export interface MessageQuote {
   senderName: string;
   content: string;
   hasImage: boolean;
+  /** 被引用消息为文档附件时的原始文件名（旧快照无此字段） */
+  fileName?: string | null;
 }
 
 // 实时聊天消息（落库后广播的形态）
@@ -35,8 +37,12 @@ export interface ChatMessage {
   senderName: string;
   isAiReply: boolean;
   content: string;
-  imagePath: string | null;
+  filePath: string | null;
+  /** 附件原始文件名（无附件时为 null） */
+  fileOrigName: string | null;
   quote: MessageQuote | null;
+  /** 撤回时间（null=未撤回）；撤回后 content/filePath 已清空 */
+  recalledAt: string | null;
   createdAt: string;
 }
 
@@ -63,7 +69,9 @@ export interface SendPeerMessagePayload {
   groupId: string;
   documentId: string | null;
   content: string;
-  imagePath?: string | null;
+  filePath?: string | null;
+  /** 附件原始文件名（随 filePath 一起校验存储） */
+  fileOrigName?: string | null;
   /** 引用的消息 id（须为同小组的 PEER 消息） */
   quoteId?: string | null;
 }
@@ -72,7 +80,13 @@ export interface SendAiMessagePayload {
   groupId: string;
   documentId: string | null;
   content: string;
-  imagePath?: string | null;
+  filePath?: string | null;
+  fileOrigName?: string | null;
+}
+
+// 撤回自己的小组消息（仅 PEER，2 分钟内）
+export interface RecallMessagePayload {
+  messageId: string;
 }
 
 // 分析聚合返回结构
@@ -88,6 +102,7 @@ export interface GroupCompareItem {
   ai: number;
   active: number; // 活跃成员数
   memberCount: number;
+  notes: number; // 组内学生的笔记总数（含普通笔记/高亮/划线）
 }
 
 export interface PersonalProfileItem {

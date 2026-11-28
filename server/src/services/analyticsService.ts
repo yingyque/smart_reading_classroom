@@ -53,8 +53,15 @@ function tokenizeRaw(text: string): string[] {
   return text.split(/[\s，。！？、；：,.!?;:()\[\]{}"'\n\r]+/);
 }
 
+// 附件消息在记录里的展示文案（无文字的纯附件消息用）
+function attachmentLabel(m: { filePath: string | null; fileOrigName: string | null }): string {
+  if (!m.filePath) return '';
+  if (/\.(png|jpg|gif|webp)$/.test(m.filePath)) return '[发送了一张图片]';
+  return m.fileOrigName ? `[发送了文件《${m.fileOrigName}》]` : '[发送了一个文件]';
+}
+
 export async function buildAnalytics(classroomId: string): Promise<AnalyticsResult> {
-  const [messages, groups] = await Promise.all([
+  const [messages, groups, notes] = await Promise.all([
     prisma.message.findMany({
       where: { classroomId },
       include: { sender: true, group: true, document: true },
@@ -64,7 +71,17 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
       where: { classroomId },
       include: { members: { include: { user: true } } },
     }),
+    // 学生笔记按作者聚合到所在小组（Note 无 groupId，通过成员关系归属）
+    prisma.note.findMany({
+      where: { classroomId },
+      select: { userId: true },
+    }),
   ]);
+
+  const noteCountByUser = new Map<string, number>();
+  for (const n of notes) {
+    noteCountByUser.set(n.userId, (noteCountByUser.get(n.userId) ?? 0) + 1);
+  }
 
   const peerMessages = messages.filter((m) => m.type === 'PEER' && !m.isAiReply);
   const aiMessages = messages.filter((m) => m.type === 'AI' && !m.isAiReply);
@@ -109,6 +126,7 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
       ai: gAi.length,
       active: activeMembers.size,
       memberCount: g.members.length,
+      notes: g.members.reduce((sum, member) => sum + (noteCountByUser.get(member.userId) ?? 0), 0),
     });
   }
 
@@ -140,21 +158,22 @@ export async function buildAnalytics(classroomId: string): Promise<AnalyticsResu
       senderName: m.sender.name,
       groupName: m.group.name,
       documentTitle: m.document?.title ?? null,
-      content: m.content || (m.imagePath ? '[发送了一张图片]' : ''),
+      content: m.content || attachmentLabel(m),
       createdAt: m.createdAt,
       aiReply: replyByQuestion.get(m.id) ?? null,
     }))
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
-  // 小组互动记录（学生间聊天的原文），最新在前
+  // 小组互动记录（学生间聊天的原文，已撤回的不展示），最新在前
   const interactions: InteractionLogItem[] = peerMessages
+    .filter((m) => !m.recalledAt)
     .map((m) => ({
       id: m.id,
       senderId: m.senderId,
       senderName: m.sender.name,
       groupName: m.group.name,
       documentTitle: m.document?.title ?? null,
-      content: m.content || (m.imagePath ? '[发送了一张图片]' : ''),
+      content: m.content || attachmentLabel(m),
       createdAt: m.createdAt,
     }))
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());

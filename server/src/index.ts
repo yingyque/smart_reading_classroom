@@ -47,9 +47,11 @@ app.use('/api/shimin', adminRoutes);
 
 // 统一错误处理（含 multer 错误）
 app.use(
-  (err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  (err: Error & { code?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('[error]', err.message);
-    res.status(400).json({ error: err.message || '服务器错误' });
+    // multer 超限错误原文案为英文 "File too large"，翻译成中文提示
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? '文件过大，超出上传大小限制' : err.message || '服务器错误';
+    res.status(400).json({ error: msg });
   },
 );
 

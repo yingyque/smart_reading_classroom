@@ -25,15 +25,16 @@ router.get('/:classroomId', authRequired, async (req: AuthedRequest, res: Respon
 // 隐私规则：PEER 小组讨论组内共享；AI 对话属于学生与 AI 的私聊，仅提问者本人可见（教师经 Socket 实时监听）
 
 // 引用快照 JSON 解析（坏数据按无引用处理）
-function safeParseQuote(raw: string): { id: string; senderName: string; content: string; hasImage: boolean } | null {
+function safeParseQuote(raw: string): { id: string; senderName: string; content: string; hasImage: boolean; fileName?: string | null } | null {
   try {
-    const q = JSON.parse(raw) as { id?: unknown; senderName?: unknown; content?: unknown; hasImage?: unknown };
+    const q = JSON.parse(raw) as { id?: unknown; senderName?: unknown; content?: unknown; hasImage?: unknown; fileName?: unknown };
     if (typeof q.id !== 'string' || typeof q.senderName !== 'string') return null;
     return {
       id: q.id,
       senderName: q.senderName,
       content: typeof q.content === 'string' ? q.content : '',
       hasImage: q.hasImage === true,
+      fileName: typeof q.fileName === 'string' ? q.fileName : null,
     };
   } catch {
     return null;
@@ -61,8 +62,10 @@ router.get('/:classroomId/messages/:groupId', authRequired, async (req: AuthedRe
       senderName: m.isAiReply ? 'AI 助手' : m.sender.name,
       isAiReply: m.isAiReply,
       content: m.content,
-      imagePath: m.imagePath,
+      filePath: m.filePath,
+      fileOrigName: m.fileOrigName,
       quote: m.quote ? safeParseQuote(m.quote) : null,
+      recalledAt: m.recalledAt ? m.recalledAt.toISOString() : null,
       createdAt: m.createdAt.toISOString(),
     })),
   );

@@ -8,13 +8,14 @@ import {
 } from '../services/containerService';
 import { QueueTimeoutError } from '../services/execQueue';
 import { config } from '../config/env';
-import { CHAT_IMAGE_NAME_RE } from '../routes/chat';
+import { CHAT_FILE_NAME_RE } from '../routes/chat';
 import {
   ChatMessage,
   JoinGroupPayload,
   JwtPayload,
   MessageQuote,
   MessageType,
+  RecallMessagePayload,
   Role,
   SendAiMessagePayload,
   SendPeerMessagePayload,
@@ -32,9 +33,24 @@ const userRoomOf = (userId: string) => `user:${userId}`;
 // 有待处理 AI 请求（排队中或执行中）的学生：防止一个学生连发多条把全局队列占满
 const pendingAiUsers = new Set<string>();
 
-// 校验聊天图片文件名（上传接口生成，防路径穿越）；非法返回 null
-function validChatImage(name: unknown): string | null {
-  return typeof name === 'string' && CHAT_IMAGE_NAME_RE.test(name) ? name : null;
+// 消息撤回时限（微信同款 2 分钟，仅发送者可撤回自己的小组消息）
+const RECALL_WINDOW_MS = 2 * 60 * 1000;
+
+// 校验聊天附件文件名（上传接口生成，防路径穿越）；非法返回 null
+function validChatFile(name: unknown): string | null {
+  return typeof name === 'string' && CHAT_FILE_NAME_RE.test(name) ? name : null;
+}
+
+// 附件是否为图片（AI 走视觉识别；文档附件无法解析内容，仅作提示）
+function isImageFileName(name: string): boolean {
+  return /\.(png|jpg|gif|webp)$/.test(name);
+}
+
+// 附件原始文件名：限长 200、去空白；未随附件或非法时为 null
+function validOrigName(name: unknown): string | null {
+  if (typeof name !== 'string') return null;
+  const t = name.trim();
+  return t ? t.slice(0, 200) : null;
 }
 
 export function registerChatHandlers(io: Server): void {
@@ -80,7 +96,8 @@ export function registerChatHandlers(io: Server): void {
       const group = await prisma.group.findUnique({ where: { id: payload.groupId } });
       if (!group) return;
       const content = (payload.content || '').trim();
-      const imagePath = validChatImage(payload.imagePath);
+      const filePath = validChatFile(payload.filePath);
+      const fileOrigName = filePath ? validOrigName(payload.fileOrigName) : null;
       // 引用快照：被引消息必须是同小组的 PEER 消息
       // （AI 对话是学生私聊，引用进小组会泄露内容，故不允许）
       let quote: MessageQuote | null = null;
@@ -90,18 +107,19 @@ export function registerChatHandlers(io: Server): void {
           where: { id: payload.quoteId },
           include: { sender: { select: { name: true } } },
         });
-        if (src && src.type === 'PEER' && src.groupId === group.id) {
+        if (src && src.type === 'PEER' && src.groupId === group.id && !src.recalledAt) {
           quotedSenderId = src.senderId;
           quote = {
             id: src.id,
             senderName: src.sender.name,
             content: src.content,
-            hasImage: !!src.imagePath,
+            hasImage: !!src.filePath && isImageFileName(src.filePath),
+            fileName: src.filePath && !isImageFileName(src.filePath) ? src.fileOrigName : null,
           };
         }
       }
-      // 纯图片 / 纯引用消息允许无文字
-      if (!content && !imagePath && !quote) return;
+      // 纯附件 / 纯引用消息允许无文字
+      if (!content && !filePath && !quote) return;
 
       const msg = await prisma.message.create({
         data: {
@@ -112,7 +130,8 @@ export function registerChatHandlers(io: Server): void {
           senderId: user.id,
           isAiReply: false,
           content,
-          imagePath: imagePath ?? null,
+          filePath: filePath ?? null,
+          fileOrigName: fileOrigName ?? null,
           quote: quote ? JSON.stringify(quote) : null,
         },
       });
@@ -128,9 +147,30 @@ export function registerChatHandlers(io: Server): void {
           groupId: group.id,
           classroomId: group.classroomId,
           fromName: user.name,
-          snippet: quote.content ? quote.content.slice(0, 60) : '[图片]',
+          snippet: quote.content
+            ? quote.content.slice(0, 60)
+            : quote.hasImage
+              ? '[图片]'
+              : quote.fileName
+                ? `[文件] ${quote.fileName.slice(0, 40)}`
+                : '[消息]',
         });
       }
+    });
+
+    // 学生撤回自己的小组消息（微信式：2 分钟内可撤回，撤回后内容与图片清除、仅留提示）
+    socket.on('peer:recall', async (payload: RecallMessagePayload) => {
+      const msg = await prisma.message.findUnique({ where: { id: payload.messageId } });
+      if (!msg || msg.type !== 'PEER' || msg.senderId !== user.id || msg.recalledAt) return;
+      if (Date.now() - msg.createdAt.getTime() > RECALL_WINDOW_MS) return;
+      // 内容与附件一并清除：历史、分析、引用校验都不再可见（已落库的引用快照保留，与微信一致）
+      const updated = await prisma.message.update({
+        where: { id: msg.id },
+        data: { recalledAt: new Date(), content: '', filePath: null, fileOrigName: null },
+      });
+      const out = toChatMessage(updated, user.name);
+      io.to(roomOf(msg.groupId)).emit('message:recalled', out);
+      io.to(teacherRoomOf(msg.classroomId)).emit('message:recalled', out);
     });
 
     // 学生向 AI 提问（学生↔AI）
@@ -138,8 +178,9 @@ export function registerChatHandlers(io: Server): void {
       const group = await prisma.group.findUnique({ where: { id: payload.groupId } });
       if (!group) return;
       const content = (payload.content || '').trim();
-      const imagePath = validChatImage(payload.imagePath);
-      if (!content && !imagePath) return;
+      const filePath = validChatFile(payload.filePath);
+      const fileOrigName = filePath ? validOrigName(payload.fileOrigName) : null;
+      if (!content && !filePath) return;
 
       // 1) 落库并广播学生提问
       const userMsg = await prisma.message.create({
@@ -151,7 +192,8 @@ export function registerChatHandlers(io: Server): void {
           senderId: user.id,
           isAiReply: false,
           content,
-          imagePath: imagePath ?? null,
+          filePath: filePath ?? null,
+          fileOrigName: fileOrigName ?? null,
         },
       });
       const userOut = toChatMessage(userMsg, user.name);
@@ -178,7 +220,12 @@ export function registerChatHandlers(io: Server): void {
         .filter((m) => m.id !== userMsg.id)
         .map((m) => ({
           role: m.isAiReply ? 'assistant' : 'user',
-          content: m.imagePath && !m.content ? '[图片]' : m.content,
+          content:
+            m.filePath && !m.content
+              ? isImageFileName(m.filePath)
+                ? '[图片]'
+                : '[文件]'
+              : m.content,
         }));
 
       // 3) 检查学生是否已配置个人 AI Key（统一共享 Key 已在注册/后台批量写入）
@@ -227,17 +274,22 @@ export function registerChatHandlers(io: Server): void {
       for (const m of recentMessages) {
         promptParts.push(m.role === 'assistant' ? `[AI]：${m.content}` : `[学生]：${m.content}`);
       }
-      // 随消息带图时：server 端先用视觉模型把图片转成文字描述，再写进 prompt。
+      // 随消息带附件时：图片由 server 端先用视觉模型转成文字描述写进 prompt；
+      // 文档附件无法解析内容，仅如实告知 AI 引导学生描述要点。
       // 不再走「docker cp 进容器 + Read 工具看图」：上游网关拒绝 tool 结果里的
       // 图片块（400 messages[3].content[0].type），该路径对所有模型都不可用。
-      let imageNote = '';
-      if (imagePath) {
-        const desc = await describeChatImage(imagePath);
-        imageNote = desc
-          ? `\n（学生随消息发送了一张图片，图片内容描述如下：\n${desc}\n请结合图片内容与学生的问题进行讨论。）`
-          : '\n（学生随消息发送了一张图片，但图片内容暂时无法识别，请告知学生稍后重试。）';
+      let attachNote = '';
+      if (filePath) {
+        if (isImageFileName(filePath)) {
+          const desc = await describeChatImage(filePath);
+          attachNote = desc
+            ? `\n（学生随消息发送了一张图片，图片内容描述如下：\n${desc}\n请结合图片内容与学生的问题进行讨论。）`
+            : '\n（学生随消息发送了一张图片，但图片内容暂时无法识别，请告知学生稍后重试。）';
+        } else {
+          attachNote = `\n（学生随消息发送了文件《${fileOrigName ?? '未命名文件'}》，你无法直接读取该文件的内容，如与问题相关，请引导学生口述文件中的要点。）`;
+        }
       }
-      promptParts.push(`[学生]：${content}${imageNote}\n\n请以 AI 讨论助手的身份直接回复上述最新问题。`);
+      promptParts.push(`[学生]：${content}${attachNote}\n\n请以 AI 讨论助手的身份直接回复上述最新问题。`);
       const prompt = promptParts.join('\n');
 
       let replyContent: string;
@@ -324,8 +376,10 @@ function toChatMessage(
     senderId: string;
     isAiReply: boolean;
     content: string;
-    imagePath: string | null;
+    filePath: string | null;
+    fileOrigName: string | null;
     quote: string | null;
+    recalledAt: Date | null;
     createdAt: Date;
   },
   senderName: string,
@@ -340,8 +394,10 @@ function toChatMessage(
     senderName: msg.isAiReply ? 'AI 助手' : senderName,
     isAiReply: msg.isAiReply,
     content: msg.content,
-    imagePath: msg.imagePath,
+    filePath: msg.filePath,
+    fileOrigName: msg.fileOrigName,
     quote: parseQuote(msg.quote),
+    recalledAt: msg.recalledAt ? msg.recalledAt.toISOString() : null,
     createdAt: msg.createdAt.toISOString(),
   };
 }

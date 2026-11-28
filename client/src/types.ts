@@ -14,6 +14,8 @@ export interface MessageQuote {
   senderName: string;
   content: string;
   hasImage: boolean;
+  /** 被引用消息为文档附件时的原始文件名（旧快照无此字段） */
+  fileName?: string | null;
 }
 
 // 消息被引用时收到的提醒（服务端 quote:notify 事件）
@@ -36,8 +38,12 @@ export interface ChatMessage {
   senderName: string;
   isAiReply: boolean;
   content: string;
-  imagePath: string | null;
+  filePath: string | null;
+  /** 附件原始文件名（无附件时为 null） */
+  fileOrigName: string | null;
   quote: MessageQuote | null;
+  /** 撤回时间（null=未撤回）；撤回后 content/filePath 为空 */
+  recalledAt: string | null;
   createdAt: string;
 }
 
@@ -113,6 +119,7 @@ export interface GroupCompareItem {
   ai: number;
   active: number;
   memberCount: number;
+  notes: number;
 }
 
 export interface PersonalProfileItem {
