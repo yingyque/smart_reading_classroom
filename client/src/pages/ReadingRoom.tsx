@@ -85,7 +85,9 @@ export default function ReadingRoom() {
       }
     };
     socket.on('message:new', onNew);
-    return () => socket.off('message:new', onNew);
+    return () => {
+      socket.off('message:new', onNew);
+    };
   }, [socket, group, user, asideTab]);
 
   if (loading) {

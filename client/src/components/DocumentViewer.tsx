@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, FileText, AlertTriangle, ExternalLink, RotateCw, Search, X, ChevronUp, ChevronDown, Trash2, Underline } from 'lucide-react';
+import { Loader2, FileText, AlertTriangle, ExternalLink, RotateCw, Search, X, ChevronUp, ChevronDown, Trash2, Underline, Download } from 'lucide-react';
 import { api, getToken } from '../lib/api';
 import { API_PREFIX } from '../lib/config';
 import { DocumentDetail, NoteItem } from '../types';
@@ -161,6 +161,39 @@ export default function DocumentViewer({ docId, classroomId, notesVersion, onNot
     }
   };
 
+  // 下载文献原文件：PDF 复用已拉取的 blob；其他格式（或 PDF 尚未加载完）现拉 raw 接口
+  const [downloading, setDownloading] = useState(false);
+  const downloadFile = async () => {
+    if (!docId || !doc || downloading) return;
+    setDownloading(true);
+    let url = '';
+    let needRevoke = false;
+    try {
+      if (pdf?.fallbackUrl) {
+        url = pdf.fallbackUrl;
+      } else {
+        const r = await fetch(`${API_PREFIX}/documents/doc/${docId}/raw`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        url = URL.createObjectURL(await r.blob());
+        needRevoke = true;
+      }
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.fileName || doc.title;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      console.error('下载文献失败', err);
+      alert('下载失败，请重试');
+    } finally {
+      if (needRevoke) setTimeout(() => URL.revokeObjectURL(url!), 30_000);
+      setDownloading(false);
+    }
+  };
+
   if (!docId) {
     return (
       <div className="flex h-full flex-col items-center justify-center text-ink-500">
@@ -180,11 +213,22 @@ export default function DocumentViewer({ docId, classroomId, notesVersion, onNot
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-ink-900/5 px-6 py-4">
-        <h2 className="text-lg font-bold text-ink-900">{doc.title}</h2>
-        <p className="text-xs text-ink-500">
-          {doc.fileType.toUpperCase()} · {doc.fileName}
-        </p>
+      <div className="flex items-start justify-between gap-3 border-b border-ink-900/5 px-6 py-4">
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-bold text-ink-900">{doc.title}</h2>
+          <p className="truncate text-xs text-ink-500">
+            {doc.fileType.toUpperCase()} · {doc.fileName}
+          </p>
+        </div>
+        <button
+          onClick={() => void downloadFile()}
+          disabled={downloading}
+          title="下载原文件"
+          className="flex shrink-0 items-center gap-1 rounded-lg border border-ink-900/10 px-2.5 py-1.5 text-xs text-ink-500 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:opacity-40"
+        >
+          {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          下载
+        </button>
       </div>
       <div className="flex-1 overflow-auto">
         {doc.fileType === 'pdf' ? (
