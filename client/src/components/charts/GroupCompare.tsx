@@ -30,6 +30,7 @@ export default function GroupCompare({ data }: { data: GroupCompareItem[] }) {
         <Bar dataKey="peer" name="小组讨论" fill="#2563EB" radius={[4, 4, 0, 0]} />
         <Bar dataKey="ai" name="AI 讨论" fill="#7C3AED" radius={[4, 4, 0, 0]} />
         <Bar dataKey="active" name="活跃人数" fill="#1C7977" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="notes" name="学生笔记" fill="#D97706" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
